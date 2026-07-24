@@ -734,14 +734,15 @@ function linkify(s){
 /* 리포트 본문을 리치 카드로 렌더링: "• 제목 — 요약 (출처: URL)" 줄을
    [썸네일 | 제목·설명·링크] 가로 카드로 변환 (유튜브=영상 썸네일, 뉴스=언론사 아이콘) */
 function richReport(s){
-  var lines = String(s==null?"":s).split("\n");
+  /* Gemini가 마크다운(**볼드, * 불릿)으로 쓰는 경우 정규화 */
+  var lines = String(s==null?"":s).replace(/\*\*/g,"").split("\n");
   var out = [];
   for (var i=0;i<lines.length;i++){
     var t = lines[i].trim();
     var um = t.match(/(https?:\/\/[^\s)<>"'　]+)/);
-    if (/^[•\-]/.test(t) && um){
+    if (/^[•\-*]/.test(t) && um){
       var url = um[1];
-      var body = t.replace(/^[•\-]\s*/,"")
+      var body = t.replace(/^[•\-*]+\s*/,"")
         .replace(/[\(（]\s*(?:출처|링크)\s*:?\s*https?:\/\/[^\s)）]+\s*[\)）]?/g,"")
         .replace(/https?:\/\/[^\s)<>"'　]+/g,"")
         .replace(/[\(（]\s*[\)）]/g,"").trim();
@@ -793,7 +794,7 @@ function parseDate(s){ if(!s) return null; var p=String(s).slice(0,10).split("-"
 var DOW = ["일","월","화","수","목","금","토"];
 
 /* ============ API ============ */
-var GAS_URL = "https://script.google.com/macros/s/AKfycbzC_emn5Gul8aWuWjdWlzqTsDd3XdbnUhSE3j3L2fq1a1YagUEPFV9VQraUuTAy1xLG/exec";
+var GAS_URL = "https://script.google.com/macros/s/AKfycbw6gFQjyAGjDnACCVkxqvsaJAejoBQEIcImH6VseGQ-4ZP5oYS_8YvayX4XS4pvlN9V/exec";
 async function loadData(){
   if (window.__MOCK__){ state.data = window.__MOCK__; state.loading=false; return; }
   /* &t= 캐시버스터: 쓰기 직후 재조회가 브라우저/중간 캐시에 걸리지 않게 */
