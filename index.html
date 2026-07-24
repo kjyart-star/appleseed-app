@@ -616,7 +616,10 @@ function openForm(table, row){
   function close(){ bg.remove(); }
   bg.querySelector("#mClose").onclick = close;
   bg.querySelector("#mCancel").onclick = close;
-  bg.addEventListener("click", function(e){ if(e.target===bg) close(); });
+  /* 바깥에서 누르고 뗀 경우에만 닫기 — 입력칸에서 드래그하다 바깥에서 놓을 때 닫히는 오작동 방지 */
+  var downOnBg = false;
+  bg.addEventListener("mousedown", function(e){ downOnBg = (e.target === bg); });
+  bg.addEventListener("mouseup", function(e){ if (downOnBg && e.target === bg) close(); downOnBg = false; });
   bg.querySelector("#mSave").onclick = async function(){
     var obj = {};
     fields.forEach(function(f){
