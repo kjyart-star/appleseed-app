@@ -752,7 +752,7 @@ function parseDate(s){ if(!s) return null; var p=String(s).slice(0,10).split("-"
 var DOW = ["일","월","화","수","목","금","토"];
 
 /* ============ API ============ */
-var GAS_URL = "https://script.google.com/macros/s/AKfycbxFwbqppysBvAMjfAsqK7tlbR78aRcHf7kSfhGg6ZqxsWT5SQrC0EE1otyvbodSaYc/exec";
+var GAS_URL = "https://script.google.com/macros/s/AKfycbwxatiNxwyzeXzON81B8s4vNQDKY6Uspk-d0_8K5Z5WGb_cQZZIPnErzHxN_aI7GHhZ/exec";
 async function loadData(){
   if (window.__MOCK__){ state.data = window.__MOCK__; state.loading=false; return; }
   /* &t= 캐시버스터: 쓰기 직후 재조회가 브라우저/중간 캐시에 걸리지 않게 */
