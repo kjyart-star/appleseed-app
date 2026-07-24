@@ -1551,10 +1551,11 @@ function mountProjectWorkspace(container){
   }
   function drawRail(){
     railEl.innerHTML =
-      "<section class='proj-card'><div class='proj-card-h'>일정</div><div data-mini-cal></div></section>"+
+      "<section class='proj-card'><div class='proj-card-h'>일정</div><div data-mini-cal></div><div data-rail-sched></div></section>"+
       "<section class='proj-card'><div class='proj-card-h'>처리 필요</div><div data-need></div></section>"+
       "<section class='proj-card'><div class='proj-card-h'>내 할일</div><div data-mytodo></div></section>";
     mountMiniCalendar(railEl.querySelector("[data-mini-cal]"));
+    railEl.querySelector("[data-rail-sched]").innerHTML = schedListHtml(5);
     var now = seoulNow(), today = new Date(now.getFullYear(),now.getMonth(),now.getDate());
     var arWait = (d.revenue||[]).filter(function(r){ return r.status!=="입금완료"; });
     var arSum = arWait.reduce(function(s,r){ return s+(Number(r.amount)||0); },0);
