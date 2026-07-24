@@ -623,6 +623,47 @@
     .kpis{grid-template-columns:1fr;} .time-grid{grid-template-columns:1fr;}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none !important;}}
+
+  /* ===== AI 공모전 ===== */
+  .ct-tabs{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;}
+  .ct-controls{display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-bottom:18px;}
+  .ct-controls .proj-search{max-width:340px; flex:1 1 240px;}
+  .ct-cats{display:flex; flex-wrap:wrap; gap:7px; flex:1 1 auto;}
+  .ct-cats .proj-chip{padding:5px 11px; font-size:12px;}
+  .ct-list{display:flex; flex-direction:column; gap:10px; padding:6px 6px 8px;}
+  .ct-card{display:flex; gap:14px; align-items:flex-start; width:100%; text-decoration:none; color:inherit;
+    border:1px solid var(--line); border-radius:12px; padding:14px 16px; background:var(--surface-2);}
+  a.ct-card{cursor:pointer;}
+  a.ct-card:hover{border-color:var(--accent);}
+  .ct-card .dday{margin-top:2px;}
+  .ct-main{flex:1; min-width:0;}
+  .ct-title{font-size:14.5px; font-weight:700; display:flex; flex-wrap:wrap; align-items:center; gap:8px; line-height:1.35;}
+  .ct-tag{display:inline-flex; align-items:center; font-size:11px; font-weight:700; padding:2px 8px;
+    border-radius:999px; background:var(--accent-soft); color:var(--accent-ink); white-space:nowrap;}
+  .ct-country{display:inline-flex; align-items:center; font-size:11px; font-weight:700; padding:2px 8px;
+    border-radius:999px; background:var(--vfx-soft); color:var(--vfx); white-space:nowrap;}
+  .ct-meta{font-size:12px; color:var(--ink-3); margin-top:5px; display:flex; flex-wrap:wrap; gap:3px 12px;}
+  .ct-meta b{color:var(--ink-2); font-weight:700;}
+  .ct-sum{font-size:12.5px; color:var(--ink-2); margin-top:7px; line-height:1.5;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
+  .ct-await-list{display:flex; flex-direction:column;}
+  .ct-await-row{display:flex; align-items:baseline; gap:12px; padding:11px 8px; border-bottom:1px solid var(--line);}
+  .ct-await-row:last-child{border-bottom:0;}
+  .ct-await-row .caw-title{font-size:13.5px; font-weight:600; flex:1; min-width:0;}
+  .ct-await-row .caw-org{font-size:12px; color:var(--ink-3); flex:none;}
+  .ct-await-row .caw-date{font-size:12px; color:var(--ink-2); font-weight:700; flex:none;}
+  .ct-credit{font-size:12.5px; color:var(--ink-3);}
+  .ct-credit b{color:var(--ink-2); font-weight:700;}
+  .ct-fail{margin:0; border:1.5px dashed var(--line-strong); border-radius:14px; padding:40px 24px;
+    text-align:center; color:var(--ink-3); background:var(--surface-2);}
+  .ct-fail .ico{font-size:30px; opacity:.55;}
+  .ct-fail h3{margin:10px 0 0; font-size:15px; color:var(--ink-2);}
+  .ct-fail p{margin:8px auto 0; font-size:13px; max-width:420px; line-height:1.6;}
+  .ct-fail a{color:var(--accent-ink); font-weight:700;}
+  @media (max-width:560px){
+    .ct-card{flex-direction:row;}
+    .ct-await-row{flex-wrap:wrap; gap:4px 10px;}
+  }
 </style>
 </head>
 <body>
@@ -818,7 +859,7 @@ var MENU = [
       ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",1] ] },
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
   { cap:"커뮤니케이션", items:[ ["mail","✉️","메일관리",1], ["namecard","🪪","명함관리",1], ["newsletter","📰","뉴스레터",1] ] },
-  { cap:"자료·리포트", items:[ ["library","📚","자료실",1], ["reports","📑","리포트",0] ] },
+  { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["library","📚","자료실",1], ["reports","📑","리포트",0] ] },
   { cap:"시스템", items:[ ["cert","🏷️","재직증명서",1] ] }
 ];
 var TITLES = {};
@@ -1732,6 +1773,19 @@ function mountProjectWorkspace(container){
         else if (t==="todos") location.hash="#todos";
         else if (t==="impending" && impending.length){ projSelId = impending[0].id; localStorage.setItem("appleseed_proj_sel", projSelId); drawList(); drawDetail(); } };
     });
+    /* 마감 임박 공모전(7일 이내, 국내+해외) — 동일 fetch 캐시 재사용, 실패 시 줄 생략 */
+    Promise.all([
+      fetchContests("domestic", false).catch(function(){ return null; }),
+      fetchContests("overseas", false).catch(function(){ return null; })
+    ]).then(function(res){
+      if (!res[0] && !res[1]) return;                 /* 둘 다 실패 → 줄 생략 */
+      var wrap = needEl.querySelector(".proj-need");
+      if (!wrap || wrap.querySelector("[data-need-go='contests']")) return;
+      var cnt = countImpendingContests(res[0]) + countImpendingContests(res[1]);
+      var row = el(needRow("contests","🏆","마감 임박 공모전", cnt, ""));
+      wrap.appendChild(row);
+      row.onclick = function(){ location.hash = "#contests"; };
+    });
     var mine = (d.actions||[]).filter(function(a){ return !a.done; })
       .sort(function(a,b){ return String(a.due||"9999").localeCompare(String(b.due||"9999")); }).slice(0,8);
     var mt = "";
@@ -1937,6 +1991,169 @@ function renderReports(){
   drawList(); drawDetail();
 }
 
+/* ---- AI 공모전 ---- */
+var CONTEST_URLS = {
+  domestic: "https://junyeo217.github.io/ai-contest-board/data/contests.json",
+  overseas: "https://junyeo217.github.io/ai-contest-board/data/overseas-contests.json"
+};
+var CONTEST_BOARD = "https://junyeo217.github.io/ai-contest-board/";
+var CONTEST_TTL = 10*60*1000; /* 10분 모듈 캐시 (두 파일 각각) */
+var contestCache = {};        /* { domestic:{t,data}, overseas:{t,data} } */
+var contestTab = "domestic", contestCat = "전체", contestSearch = "";
+function fetchContests(kind, force){
+  var c = contestCache[kind];
+  if (!force && c && (Date.now()-c.t) < CONTEST_TTL) return Promise.resolve(c.data);
+  return fetch(CONTEST_URLS[kind], { cache:"no-store" }).then(function(r){
+    if (!r.ok) throw new Error("HTTP "+r.status);
+    return r.json();
+  }).then(function(j){ contestCache[kind] = { t:Date.now(), data:j }; return j; });
+}
+function ctSafeUrl(u){ return /^https?:\/\//i.test(String(u||"")) ? String(u) : ""; }
+function ctFmtGen(g){ if(!g) return ""; return String(g).replace("T"," ").replace(/(:\d\d)(\.\d+)?(Z|[+-]\d\d:?\d\d)?$/,"$1").slice(0,16); }
+function ctCount(sec){ return (sec&&sec.ongoing||[]).concat(sec&&sec.starting_today||[]); }
+/* 마감 임박(7일 이내, 국내+해외) 카운트 — 대시보드 레일에서 재사용 */
+function countImpendingContests(data){
+  if (!data || !data.sections) return 0;
+  var now = seoulNow(), today = new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  var n = 0;
+  ctCount(data.sections).forEach(function(it){
+    var e = parseDate(it.submission_end); if(!e) return;
+    var diff = Math.round((e-today)/86400000);
+    if (diff>=0 && diff<=7) n++;
+  });
+  return n;
+}
+function renderContests(){
+  var now = seoulNow(), today = new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  var actions = "<button class='btn sm' data-ct-refresh>↻ 갱신</button>";
+  var html = pageHead("contests", "데이터: <b>AI 공모전 보드</b>(자동 갱신) · <span class='ct-credit' data-ct-gen>불러오는 중…</span>", actions);
+  html += "<div class='ct-tabs' data-ct-tabs>"+
+    [["domestic","국내"],["overseas","해외"]].map(function(t){
+      return "<button class='proj-chip"+(t[0]===contestTab?" on":"")+"' data-ct-tab='"+esc(t[0])+"'>"+esc(t[1])+"</button>";
+    }).join("")+"</div>";
+  html += "<div class='ct-controls'><input class='proj-search' type='text' placeholder='제목·주최 검색' data-ct-search>"+
+    "<div class='ct-cats' data-ct-cats></div></div>";
+  html += "<div data-ct-body><div class='empty'>공모전 보드를 불러오는 중…</div></div>";
+  C.innerHTML = html;
+
+  var bodyEl = C.querySelector("[data-ct-body]");
+  var catsEl = C.querySelector("[data-ct-cats]");
+  var genEl  = C.querySelector("[data-ct-gen]");
+  var searchEl = C.querySelector("[data-ct-search]");
+  searchEl.value = contestSearch;
+  var curData = null;
+
+  function collectCats(data){
+    var set = {}, order = [];
+    ["starting_today","ongoing","awaiting_results"].forEach(function(k){
+      ((data.sections&&data.sections[k])||[]).forEach(function(it){
+        var c = String(it.category||"").trim();
+        if (c && !set[c]){ set[c]=1; order.push(c); }
+      });
+    });
+    return order;
+  }
+  function drawCats(){
+    var chips = ["전체"].concat(curData ? collectCats(curData) : []);
+    if (contestCat!=="전체" && chips.indexOf(contestCat)<0) contestCat = "전체";
+    catsEl.innerHTML = chips.map(function(c){
+      return "<button class='proj-chip"+(c===contestCat?" on":"")+"' data-ct-cat='"+esc(c)+"'>"+esc(c)+"</button>";
+    }).join("");
+    catsEl.querySelectorAll("[data-ct-cat]").forEach(function(b){
+      b.onclick = function(){ contestCat = b.getAttribute("data-ct-cat"); drawCats(); drawBody(); };
+    });
+  }
+  function match(it){
+    if (contestCat!=="전체" && String(it.category||"")!==contestCat) return false;
+    var q = String(contestSearch||"").trim().toLowerCase();
+    if (!q) return true;
+    return String(it.title||"").toLowerCase().indexOf(q)>=0 ||
+           String(it.organizer||"").toLowerCase().indexOf(q)>=0;
+  }
+  function contestCard(it){
+    var di = ddayInfo(it.submission_end, today, false);
+    var url = ctSafeUrl(it.url);
+    var titleBits = "<span>"+esc(it.title||"(제목 없음)")+"</span>";
+    if (it.category) titleBits += "<span class='ct-tag'>"+esc(it.category)+"</span>";
+    if (it.country)  titleBits += "<span class='ct-country'>"+esc(it.country)+"</span>";
+    var metaBits = [];
+    if (it.organizer) metaBits.push("<b>"+esc(it.organizer)+"</b>");
+    var sd = String(it.submission_start||"").slice(0,10), ed = String(it.submission_end||"").slice(0,10);
+    if (sd || ed) metaBits.push("접수 "+esc(sd||"미정")+" ~ "+esc(ed||"미정"));
+    var rd = String(it.result_date||"").trim();
+    if (rd && rd!=="미정") metaBits.push("발표 "+esc(rd.slice(0,10)));
+    var inner =
+      "<div class='dday "+di.cls+" tnum'>"+di.txt+"</div>"+
+      "<div class='ct-main'><div class='ct-title'>"+titleBits+"</div>"+
+      "<div class='ct-meta'>"+metaBits.join("<span>·</span>")+"</div>"+
+      (it.summary?"<div class='ct-sum'>"+esc(it.summary)+"</div>":"")+"</div>";
+    if (url) return "<a class='ct-card' href='"+esc(url)+"' target='_blank' rel='noopener noreferrer'>"+inner+"</a>";
+    return "<div class='ct-card'>"+inner+"</div>";
+  }
+  function drawBody(){
+    if (!curData){ return; }
+    var sec = curData.sections || {};
+    var ongoing = ((sec.ongoing||[]).concat(sec.starting_today||[])).filter(match)
+      .sort(function(a,b){ return String(a.submission_end||"9999").localeCompare(String(b.submission_end||"9999")); });
+    var awaiting = (sec.awaiting_results||[]).filter(match);
+
+    var h = "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>모집 중</div>"+
+      "<h3>진행중 공모전</h3></div><div class='sec-note'>"+ongoing.length+"건 · 마감 임박순</div></div><div class='ct-list'>";
+    if (!ongoing.length) h += "<div class='empty'>표시할 진행중 공모전이 없습니다.</div>";
+    else ongoing.forEach(function(it){ h += contestCard(it); });
+    h += "</div></section>";
+
+    h += "<section class='panel collapsed' data-foldsec><div class='sec-head fold-head' data-fold>"+
+      "<div><div class='eyebrow'>결과 발표</div><h3>발표 대기 <span style='color:var(--ink-3);font-weight:600'>("+awaiting.length+")</span></h3></div>"+
+      "<span class='fold-btn'>▾</span></div><div class='fold-body'><div class='ct-await-list'>";
+    if (!awaiting.length) h += "<div class='empty'>발표 대기 중인 공모전이 없습니다.</div>";
+    else awaiting.forEach(function(it){
+      var rd = String(it.result_date||"").trim();
+      h += "<div class='ct-await-row'><span class='caw-title'>"+esc(it.title||"(제목 없음)")+"</span>"+
+        (it.organizer?"<span class='caw-org'>"+esc(it.organizer)+"</span>":"")+
+        "<span class='caw-date tnum'>발표 "+esc(rd && rd!=="미정" ? rd.slice(0,10) : "미정")+"</span></div>";
+    });
+    h += "</div></div></section>";
+
+    bodyEl.innerHTML = h;
+    /* 발표 대기 섹션 기본 접힘 */
+    var fs = bodyEl.querySelector("[data-foldsec]"); if (fs) fs.classList.add("collapsed");
+    bindFold(bodyEl);
+  }
+  function showFail(){
+    curData = null;
+    genEl.textContent = "불러오기 실패";
+    catsEl.innerHTML = "";
+    bodyEl.innerHTML = "<div class='ct-fail'><div class='ico'>📡</div><h3>공모전 보드를 불러오지 못했습니다</h3>"+
+      "<p>네트워크 상태를 확인한 뒤 다시 시도하거나, 원본 보드를 직접 확인하세요.</p>"+
+      "<p><a href='"+esc(CONTEST_BOARD)+"' target='_blank' rel='noopener noreferrer'>AI 공모전 보드 열기 ↗</a></p></div>";
+  }
+  function load(force){
+    bodyEl.innerHTML = "<div class='empty'>공모전 보드를 불러오는 중…</div>";
+    genEl.textContent = "불러오는 중…";
+    fetchContests(contestTab, force).then(function(j){
+      if (curRoute()!=="contests") return;   /* 라우트 이탈 시 무시 */
+      curData = j;
+      genEl.textContent = j.generated_at ? ("업데이트 "+ctFmtGen(j.generated_at)) : "";
+      drawCats(); drawBody();
+    }).catch(function(){ if (curRoute()==="contests") showFail(); });
+  }
+
+  C.querySelectorAll("[data-ct-tab]").forEach(function(b){
+    b.onclick = function(){
+      var k = b.getAttribute("data-ct-tab"); if (k===contestTab) return;
+      contestTab = k; contestCat = "전체";
+      C.querySelectorAll("[data-ct-tab]").forEach(function(x){ x.classList.toggle("on", x.getAttribute("data-ct-tab")===contestTab); });
+      load(false);
+    };
+  });
+  searchEl.oninput = function(){ contestSearch = searchEl.value; if (curData) drawBody(); };
+  var rf = C.querySelector("[data-ct-refresh]");
+  if (rf) rf.onclick = function(){ delete contestCache[contestTab]; load(true); };
+
+  load(false);
+}
+
 /* ---- 준비 중 ---- */
 function renderPlaceholder(route){
   var html = pageHead(route, "", "");
@@ -1960,7 +2177,8 @@ function bindFold(root){
 var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
   memos:renderMemos, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
-  deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports
+  deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
+  contests:renderContests
 };
 function render(){
   var route = curRoute();
