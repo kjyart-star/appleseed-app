@@ -190,7 +190,7 @@
   .cal-dow.sun{color:var(--urgent);}
   .cal-cell{height:42px; display:flex; flex-direction:column; align-items:center;
     justify-content:center; gap:3px; border-radius:8px; font-size:12px; color:var(--ink); position:relative;}
-  .cal-cell.empty{visibility:hidden;}
+  .cal-cell.empty{visibility:hidden; padding:0;} /* 주의: 범용 .empty(안내문 패딩) 규칙과 충돌 방지 */
   .cal-cell.has:hover{background:var(--surface-2);}
   .cal-cell .cnum{line-height:1;}
   .cal-cell.today .cnum{background:var(--accent); color:#fff; font-weight:700; width:22px; height:22px;
