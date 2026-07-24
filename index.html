@@ -374,6 +374,8 @@
     align-items:center; flex-wrap:wrap;}
   .rep-content{padding:18px 20px; font-size:13.5px; line-height:1.7; color:var(--ink-2);
     white-space:pre-wrap; word-break:break-word;}
+  .rep-content a{color:var(--accent-ink); text-decoration:underline; text-underline-offset:2px;}
+  .rep-content a:hover{color:var(--accent);}
   .rtype-badge{font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; white-space:nowrap;}
   .rtype-badge.daily{color:var(--vfx); background:var(--vfx-soft);}
   .rtype-badge.weekly{color:var(--aivfx); background:var(--aivfx-soft);}
@@ -640,6 +642,12 @@ var state = { data:null, mask: localStorage.getItem("appleseed_mask")==="1", loa
 /* ============ 유틸 ============ */
 function esc(s){ s = (s==null?"":String(s));
   return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+/* 본문 속 URL을 새 탭으로 열리는 링크로 변환 (이스케이프 후 치환 — 괄호·따옴표는 URL에서 제외) */
+function linkify(s){
+  return esc(s).replace(/(https?:\/\/[^\s)<>"'　]+)/g, function(u){
+    return "<a href='"+u+"' target='_blank' rel='noopener noreferrer'>"+u+"</a>";
+  });
+}
 function comma(n){ n = Number(n)||0; return Math.round(n).toLocaleString("ko-KR"); }
 function moneyWon(n){ return "<span class='money'>"+comma(n)+"원</span>"; }
 function moneyMan(n){ var m = Math.round((Number(n)||0)/10000); return "<span class='money'>"+comma(m)+"</span><small>만원</small>"; }
@@ -1842,7 +1850,7 @@ function renderReports(){
       "<div class='rep-d-meta'><span class='rtype-badge "+rtypeCls(r.rtype)+"'>"+esc(r.rtype||"수시")+"</span>"+
       "<span class='tnum'>"+esc(String(r.report_date||"").slice(0,10))+"</span></div></div>"+
       "<button class='btn sm ghost danger' data-rep-del='"+esc(r.id)+"'>삭제</button></div>"+
-      "<div class='rep-content'>"+esc(r.content||"")+"</div>";
+      "<div class='rep-content'>"+linkify(r.content||"")+"</div>";
     var db = detailEl.querySelector("[data-rep-del]");
     if (db) db.onclick = function(){ delRow("reports", r.id); };
   }
