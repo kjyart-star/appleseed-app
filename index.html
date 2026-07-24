@@ -455,21 +455,23 @@ function parseDate(s){ if(!s) return null; var p=String(s).slice(0,10).split("-"
 var DOW = ["일","월","화","수","목","금","토"];
 
 /* ============ API ============ */
-function apiUrl(p){ return "https://kmygqpqasvxbbtzppsuj.supabase.co/functions/v1/appleseed/api/"+p; }
-function headers(){ return { "content-type":"application/json", "x-app-key": KEY }; }
+var GAS_URL = "https://script.google.com/macros/s/AKfycbzNZ05uSJ06dC6j5uxtRZ35tkwVJAQsiysBAy9sN2rFTO7A8GwejIX3DDpqyiB3lh2i/exec";
 async function loadData(){
   if (window.__MOCK__){ state.data = window.__MOCK__; state.loading=false; return; }
-  var r = await fetch(apiUrl("data"), { headers: { "x-app-key": KEY } });
-  if (!r.ok){ var e = await r.json().catch(function(){return{error:r.status};}); throw new Error(e.error||("HTTP "+r.status)); }
-  state.data = await r.json();
+  var r = await fetch(GAS_URL + "?action=data&key=" + encodeURIComponent(KEY));
+  if (!r.ok){ throw new Error("HTTP "+r.status); }
+  var j = await r.json();
+  if (j && j.error) throw new Error(j.error);
+  state.data = j;
   state.loading = false;
 }
 async function apiSend(method, table, id, body){
   if (window.__MOCK__){ alert("목 모드: 저장은 실서버에서만 동작합니다."); return null; }
-  var url = apiUrl(table) + (id?("/"+id):"");
-  var r = await fetch(url, { method:method, headers: headers(), body: body?JSON.stringify(body):undefined });
+  var action = method==="POST"?"insert":method==="PATCH"?"update":"delete";
+  var r = await fetch(GAS_URL, { method:"POST", body: JSON.stringify({ key:KEY, action:action, table:table, id:id||null, row:body||null }) });
   var j = await r.json().catch(function(){return{};});
   if (!r.ok) throw new Error(j.error || ("HTTP "+r.status));
+  if (j && j.error) throw new Error(j.error);
   return j;
 }
 async function crud(method, table, id, body){
