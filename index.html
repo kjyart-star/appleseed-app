@@ -816,11 +816,29 @@ async function apiSend(method, table, id, body){
 }
 async function crud(method, table, id, body){
   try{
-    await apiSend(method, table, id, body);
-    /* 구글시트 쓰기 직후 바로 읽으면 간혹 반영 전 데이터가 오므로 잠깐 대기 후 재조회 */
-    await new Promise(function(res){ setTimeout(res, 450); });
-    await loadData();
+    var res = await apiSend(method, table, id, body);
+    /* 낙관적 반영: 서버 응답을 즉시 로컬 상태에 적용 → 새로고침 없이 바로 보임 */
+    try{
+      var list = state.data && state.data[table];
+      if (list){
+        if (method === "POST"){
+          if (res && res.row) list.push(res.row);
+        } else if (method === "PATCH"){
+          for (var i=0;i<list.length;i++){
+            if (String(list[i].id) === String(id)){
+              if (res && res.row) list[i] = res.row;
+              else if (body) for (var k in body) list[i][k] = body[k];
+              break;
+            }
+          }
+        } else if (method === "DELETE"){
+          state.data[table] = list.filter(function(r){ return String(r.id) !== String(id); });
+        }
+      }
+    }catch(eOpt){}
     render();
+    /* 백그라운드 정합 재확인 (구글시트 지연 반영 대비) */
+    setTimeout(function(){ loadData().then(render).catch(function(){}); }, 1200);
   }catch(e){ alert("오류: "+e.message); }
 }
 
