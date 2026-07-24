@@ -282,6 +282,15 @@
   .st-badge{font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px;}
   .st-badge.wait{color:var(--pending); background:var(--pending-soft);}
   .st-badge.done{color:var(--pos); background:var(--accent-soft);}
+  /* 세금계산서 인라인 드롭다운 (배지형 <select>) */
+  .tax-sel{font-size:11px; font-weight:700; border:1px solid transparent; border-radius:999px;
+    padding:2px 8px; cursor:pointer; font-family:var(--font); -webkit-appearance:none; appearance:none;
+    text-align:center; text-align-last:center;}
+  .tax-sel:focus{outline:none; border-color:var(--accent);}
+  .tax-sel.t-wait{color:var(--pending); background:var(--pending-soft);}
+  .tax-sel.t-done{color:var(--pos); background:var(--accent-soft);}
+  .tax-sel.t-none{color:var(--ink-3); background:var(--surface-2);}
+  .tax-sel option{color:var(--ink); background:var(--surface);}
   .row-actions{display:flex; gap:6px; justify-content:flex-end;}
   .icon-btn{border:1px solid var(--line); background:var(--surface); color:var(--ink-2);
     border-radius:7px; width:28px; height:28px; cursor:pointer; font-size:13px; display:grid; place-items:center;}
@@ -330,6 +339,39 @@
   .placeholder h3{margin:12px 0 0; font-size:16px; color:var(--ink-2);}
   .placeholder p{margin:8px auto 0; font-size:13px; max-width:420px; line-height:1.6;}
   .empty{padding:40px 20px; text-align:center; color:var(--ink-3); font-size:13px;}
+
+  /* ===== 리포트 ===== */
+  .rep-chips{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px;}
+  .rep-wrap{display:grid; grid-template-columns:clamp(260px,26vw,360px) minmax(0,1fr); gap:20px; align-items:start;}
+  .rep-list{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); overflow:hidden;}
+  .rep-item{display:block; width:100%; text-align:left; border:0; border-bottom:1px solid var(--line);
+    background:transparent; padding:13px 15px; cursor:pointer;}
+  .rep-item:last-child{border-bottom:0;}
+  .rep-item:hover{background:var(--surface-2);}
+  .rep-item.on{background:var(--accent-soft);}
+  .rep-item .ri-top{display:flex; align-items:center; gap:8px; margin-bottom:4px;}
+  .rep-item .ri-title{font-size:13.5px; font-weight:700; color:var(--ink); min-width:0;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .rep-item.on .ri-title{color:var(--accent-ink);}
+  .rep-item .ri-date{font-size:11.5px; color:var(--ink-3);}
+  .rep-detail{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); overflow:hidden; min-width:0;}
+  .rep-note{padding:11px 20px; font-size:12px; color:var(--ink-3);
+    background:var(--surface-2); border-bottom:1px solid var(--line);}
+  .rep-d-head{display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
+    padding:16px 20px; border-bottom:1px solid var(--line);}
+  .rep-d-title{font-size:18px; font-weight:800; letter-spacing:-.01em;}
+  .rep-d-meta{font-size:12px; color:var(--ink-3); margin-top:6px; display:flex; gap:8px;
+    align-items:center; flex-wrap:wrap;}
+  .rep-content{padding:18px 20px; font-size:13.5px; line-height:1.7; color:var(--ink-2);
+    white-space:pre-wrap; word-break:break-word;}
+  .rtype-badge{font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; white-space:nowrap;}
+  .rtype-badge.daily{color:var(--vfx); background:var(--vfx-soft);}
+  .rtype-badge.weekly{color:var(--aivfx); background:var(--aivfx-soft);}
+  .rtype-badge.monthly{color:var(--aiedu); background:var(--aiedu-soft);}
+  .rtype-badge.adhoc{color:var(--ink-3); background:var(--surface-2);}
+  @media (max-width:820px){ .rep-wrap{grid-template-columns:1fr;} }
 
   /* ===== 요약 소계 스트립 ===== */
   .sum-strip{display:flex; flex-wrap:wrap; gap:8px 10px; padding:14px 20px 0;}
@@ -595,6 +637,16 @@ function moneyMan(n){ var m = Math.round((Number(n)||0)/10000); return "<span cl
 function el(html){ var d=document.createElement("div"); d.innerHTML=html.trim(); return d.firstChild; }
 function typeCls(t){ return t==="AI VFX"?"aivfx": t==="AI콘텐츠"?"aicontent": t==="AI교육"?"aiedu":"vfx"; }
 function statusCls(s){ return s==="진행중"?"run": s==="제안중"?"prop": s==="완료"?"done":"hold"; }
+/* 세금계산서 상태: 빈 값/누락은 "미발행"으로 취급 */
+function taxStatus(r){ var t = r && r.tax_status; return (t==null || String(t).trim()==="") ? "미발행" : String(t); }
+function taxCls(t){ return t==="발행완료"?"t-done": t==="불필요"?"t-none":"t-wait"; }
+/* 계산서 미발행 집계(입금 상태 무관, 전체 매출 대상) */
+function taxUnissued(){
+  var rows = (state.data && state.data.revenue || []).filter(function(r){ return taxStatus(r)==="미발행"; });
+  var sum = rows.reduce(function(a,r){ return a+(Number(r.amount)||0); },0);
+  return { n:rows.length, sum:sum, rows:rows };
+}
+function rtypeCls(t){ return t==="일간"?"daily": t==="주간"?"weekly": t==="월간"?"monthly":"adhoc"; }
 
 /* Asia/Seoul 현재 시각 */
 function seoulNow(){
@@ -674,7 +726,7 @@ var MENU = [
       ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",1] ] },
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
   { cap:"커뮤니케이션", items:[ ["mail","✉️","메일관리",1], ["namecard","🪪","명함관리",1], ["newsletter","📰","뉴스레터",1] ] },
-  { cap:"자료·리포트", items:[ ["library","📚","자료실",1], ["reports","📑","리포트",1] ] },
+  { cap:"자료·리포트", items:[ ["library","📚","자료실",1], ["reports","📑","리포트",0] ] },
   { cap:"시스템", items:[ ["cert","🏷️","재직증명서",1] ] }
 ];
 var TITLES = {};
@@ -708,7 +760,9 @@ function pageHead(route, desc, actions){
 /* ============ 폼 모달 ============ */
 var FIELDS = {
   revenue: [ ["date","입금/발생일","date"], ["client","고객사","text"], ["item","항목","text"], ["amount","금액(원)","number"],
-    ["status","상태","select",["입금대기","입금완료"]], ["project","프로젝트","text"], ["memo","메모","text"] ],
+    ["status","상태","select",["입금대기","입금완료"]],
+    ["tax_status","세금계산서","select",["미발행","발행완료","불필요"]], ["tax_no","승인번호","text"],
+    ["project","프로젝트","text"], ["memo","메모","text"] ],
   expense: [ ["date","지출일","date"], ["vendor","거래처","text"], ["item","항목","text"], ["amount","금액(원)","number"],
     ["category","분류","text"], ["memo","메모","text"] ],
   projects: [ ["name","프로젝트명","text"], ["client","고객사","text"], ["type","유형","select",["VFX","AI VFX","AI콘텐츠","AI교육"]],
@@ -1570,14 +1624,17 @@ function mountProjectWorkspace(container){
     var lateTodos = (d.actions||[]).filter(function(a){ if(a.done) return false; var dd=parseDate(a.due); return dd && dd<today; });
     var impending = (d.projects||[]).filter(function(p){ if(p.status!=="진행중") return false; var e=parseDate(p.end_date); if(!e) return false; var diff=Math.round((e-today)/86400000); return diff>=0 && diff<=14; })
       .sort(function(a,b){ return String(a.end_date||"").localeCompare(String(b.end_date||"")); });
+    var tax = taxUnissued();
     var needEl = railEl.querySelector("[data-need]");
     needEl.innerHTML = "<div class='proj-need'>"+
       needRow("deposits","🏦","미수금", arWait.length, moneyMan(arSum))+
+      needRow("revenue","🧾","세금계산서 미발행", tax.n, moneyMan(tax.sum))+
       needRow("todos","⏰","지연 할일", lateTodos.length, "")+
       needRow("impending","📌","마감 임박(14일)", impending.length, "")+"</div>";
     needEl.querySelectorAll("[data-need-go]").forEach(function(b){
       b.onclick = function(){ var t=b.getAttribute("data-need-go");
         if (t==="deposits") location.hash="#deposits";
+        else if (t==="revenue") location.hash="#revenue";
         else if (t==="todos") location.hash="#todos";
         else if (t==="impending" && impending.length){ projSelId = impending[0].id; localStorage.setItem("appleseed_proj_sel", projSelId); drawList(); drawDetail(); } };
     });
@@ -1610,17 +1667,22 @@ function renderRevenue(){
   var d = state.data, list = (d.revenue||[]).slice().sort(function(a,b){ return String(b.date||"").localeCompare(String(a.date||"")); });
   var sum = list.reduce(function(a,r){ return a+(Number(r.amount)||0); },0);
   var doneSum = list.filter(function(r){return r.status==="입금완료";}).reduce(function(a,r){return a+(Number(r.amount)||0);},0);
+  var tax = taxUnissued();
   var html = pageHead("revenue","", "<button class='btn primary' data-add>+ 매출 추가</button>");
-  html += "<section class='panel'><div class='sum-strip'><div class='sum-chip'>전체 매출<b class='tnum'>"+moneyMan(sum)+"</b></div><div class='sum-chip'>입금완료<b class='tnum'>"+moneyMan(doneSum)+"</b></div><div class='sum-chip'>입금대기<b class='tnum'>"+moneyMan(sum-doneSum)+"</b></div></div><div class='tbl-scroll'>";
+  html += "<section class='panel'><div class='sum-strip'><div class='sum-chip'>전체 매출<b class='tnum'>"+moneyMan(sum)+"</b></div><div class='sum-chip'>입금완료<b class='tnum'>"+moneyMan(doneSum)+"</b></div><div class='sum-chip'>입금대기<b class='tnum'>"+moneyMan(sum-doneSum)+"</b></div><div class='sum-chip'>계산서 미발행 "+tax.n+"건<b class='tnum'>"+moneyMan(tax.sum)+"</b></div></div><div class='tbl-scroll'>";
   if (!list.length) html += "<div class='empty'>매출 내역이 없습니다.</div>";
-  else { html += "<table><thead><tr><th>날짜</th><th>고객사</th><th>항목</th><th class='r'>금액</th><th class='c'>상태</th><th>프로젝트</th><th class='r'>관리</th></tr></thead><tbody>";
+  else { html += "<table><thead><tr><th>날짜</th><th>고객사</th><th>항목</th><th class='r'>금액</th><th class='c'>상태</th><th class='c'>세금계산서</th><th>프로젝트</th><th class='r'>관리</th></tr></thead><tbody>";
     list.forEach(function(r){
       var done = r.status==="입금완료";
+      var ts = taxStatus(r);
+      var taxOpts = ["미발행","발행완료","불필요"].map(function(s){ return "<option"+(s===ts?" selected":"")+">"+esc(s)+"</option>"; }).join("");
       html += "<tr><td class='tnum'>"+esc(String(r.date||"").slice(0,10))+"</td><td>"+esc(r.client||"")+"</td><td>"+esc(r.item||"")+"</td><td class='r tnum'>"+moneyWon(r.amount)+"</td>"+
-        "<td class='c'><button class='st-badge "+(done?"done":"wait")+"' data-status='"+r.id+"' title='클릭하여 상태 전환'>"+esc(r.status||"입금대기")+"</button></td><td style='color:var(--ink-3)'>"+esc(r.project||"")+"</td>"+
+        "<td class='c'><button class='st-badge "+(done?"done":"wait")+"' data-status='"+r.id+"' title='클릭하여 상태 전환'>"+esc(r.status||"입금대기")+"</button></td>"+
+        "<td class='c'><select class='tax-sel "+taxCls(ts)+"' data-tax='"+r.id+"' title='세금계산서 상태 변경'>"+taxOpts+"</select></td>"+
+        "<td style='color:var(--ink-3)'>"+esc(r.project||"")+"</td>"+
         "<td class='r'><div class='row-actions'><button class='icon-btn' data-edit='"+r.id+"'>✎</button><button class='icon-btn del' data-del='"+r.id+"'>🗑</button></div></td></tr>";
     });
-    html += "</tbody><tfoot><tr><td colspan='3' style='font-weight:700'>합계</td><td class='r tnum'>"+moneyWon(sum)+"</td><td colspan='3'></td></tr></tfoot></table>"; }
+    html += "</tbody><tfoot><tr><td colspan='3' style='font-weight:700'>합계</td><td class='r tnum'>"+moneyWon(sum)+"</td><td colspan='4'></td></tr></tfoot></table>"; }
   html += "</div></section>";
   C.innerHTML = html;
   C.querySelector("[data-add]").onclick = function(){ openForm("revenue", null); };
@@ -1628,6 +1690,9 @@ function renderRevenue(){
   C.querySelectorAll("[data-status]").forEach(function(b){
     b.onclick = function(){ var id=b.getAttribute("data-status"); var row=findById(d.revenue,id);
       crud("PATCH","revenue",id,{status: row.status==="입금완료"?"입금대기":"입금완료"}); };
+  });
+  C.querySelectorAll("[data-tax]").forEach(function(sel){
+    sel.onchange = function(){ crud("PATCH","revenue",sel.getAttribute("data-tax"),{tax_status:sel.value}); };
   });
 }
 
@@ -1718,6 +1783,66 @@ function renderProfit(){
   C.innerHTML = html;
 }
 
+/* ---- 리포트 ---- */
+var reportSelId = null, reportFilter = "전체";
+function renderReports(){
+  var d = state.data;
+  var noteDesc = "리포트는 Claude에게 '/재무점검' 또는 '/리포트'로 요청하면 자동 생성됩니다.";
+  var html = pageHead("reports", noteDesc, "");
+  /* 백엔드 v4 미배포: reports 키 자체가 없으면 안내만 표시(에러 없음) */
+  if (!d.reports){
+    html += "<section class='panel' style='background:transparent;border:0;box-shadow:none'><div class='placeholder'><div class='ico'>🧩</div><h3>백엔드 업그레이드(v4) 후 사용 가능</h3><p>리포트 기능은 백엔드(v4)를 배포한 뒤 사용할 수 있습니다. 배포 전에는 표시할 데이터가 없습니다.</p></div></section>";
+    C.innerHTML = html;
+    return;
+  }
+  var all = (d.reports||[]).slice().sort(function(a,b){ return String(b.report_date||"").localeCompare(String(a.report_date||"")); });
+  html += "<div class='rep-chips' data-rep-chips>"+
+    ["전체","일간","주간","월간","수시"].map(function(s){ return "<button class='proj-chip"+(s===reportFilter?" on":"")+"' data-rep-filter='"+esc(s)+"'>"+esc(s)+"</button>"; }).join("")+
+    "</div>";
+  html += "<div class='rep-wrap'><aside class='rep-list' data-rep-list></aside><main class='rep-detail' data-rep-detail></main></div>";
+  C.innerHTML = html;
+  var listEl = C.querySelector("[data-rep-list]");
+  var detailEl = C.querySelector("[data-rep-detail]");
+
+  function filtered(){ return all.filter(function(r){ return reportFilter==="전체" || String(r.rtype||"")===reportFilter; }); }
+  function drawList(){
+    var fl = filtered();
+    if (!findById(fl, reportSelId)) reportSelId = fl.length ? fl[0].id : null;
+    if (!fl.length){ listEl.innerHTML = "<div class='empty'>표시할 리포트가 없습니다.</div>"; return; }
+    var h = "";
+    fl.forEach(function(r){
+      var on = String(r.id)===String(reportSelId) ? " on" : "";
+      h += "<button class='rep-item"+on+"' data-rep-pick='"+esc(r.id)+"'>"+
+        "<div class='ri-top'><span class='rtype-badge "+rtypeCls(r.rtype)+"'>"+esc(r.rtype||"수시")+"</span>"+
+        "<span class='ri-title'>"+esc(r.title||"(제목 없음)")+"</span></div>"+
+        "<div class='ri-date tnum'>"+esc(String(r.report_date||"").slice(0,10))+"</div></button>";
+    });
+    listEl.innerHTML = h;
+    listEl.querySelectorAll("[data-rep-pick]").forEach(function(b){
+      b.onclick = function(){ reportSelId = b.getAttribute("data-rep-pick"); drawList(); drawDetail(); };
+    });
+  }
+  function drawDetail(){
+    var r = findById(all, reportSelId);
+    if (!r){ detailEl.innerHTML = "<div class='proj-empty'><div class='pe-ico'>📑</div><h3>리포트가 없습니다</h3><p>Claude에게 '/재무점검' 또는 '/리포트'로 생성을 요청하세요.</p></div>"; return; }
+    detailEl.innerHTML =
+      "<div class='rep-note'>"+esc(noteDesc)+"</div>"+
+      "<div class='rep-d-head'><div><div class='rep-d-title'>"+esc(r.title||"(제목 없음)")+"</div>"+
+      "<div class='rep-d-meta'><span class='rtype-badge "+rtypeCls(r.rtype)+"'>"+esc(r.rtype||"수시")+"</span>"+
+      "<span class='tnum'>"+esc(String(r.report_date||"").slice(0,10))+"</span></div></div>"+
+      "<button class='btn sm ghost danger' data-rep-del='"+esc(r.id)+"'>삭제</button></div>"+
+      "<div class='rep-content'>"+esc(r.content||"")+"</div>";
+    var db = detailEl.querySelector("[data-rep-del]");
+    if (db) db.onclick = function(){ delRow("reports", r.id); };
+  }
+  C.querySelectorAll("[data-rep-filter]").forEach(function(b){
+    b.onclick = function(){ reportFilter = b.getAttribute("data-rep-filter"); reportSelId = null;
+      C.querySelectorAll("[data-rep-filter]").forEach(function(c){ c.classList.toggle("on", c.getAttribute("data-rep-filter")===reportFilter); });
+      drawList(); drawDetail(); };
+  });
+  drawList(); drawDetail();
+}
+
 /* ---- 준비 중 ---- */
 function renderPlaceholder(route){
   var html = pageHead(route, "", "");
@@ -1741,7 +1866,7 @@ function bindFold(root){
 var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
   memos:renderMemos, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
-  deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit
+  deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports
 };
 function render(){
   var route = curRoute();
