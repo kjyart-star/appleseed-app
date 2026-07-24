@@ -391,7 +391,7 @@
     border:1px solid var(--line); display:block;}
   .rep-content .yt-thumb span{font-size:12px; color:var(--accent-ink); font-weight:700;}
   /* 리치 아이템 카드: [썸네일 | 제목·설명·링크] */
-  .rep-content .item-card{display:flex; gap:14px; align-items:flex-start; max-width:800px;
+  .rep-content .item-card{display:flex; gap:14px; align-items:flex-start; width:100%;
     border:1px solid var(--line); border-radius:12px; background:var(--surface-2);
     padding:13px 15px; margin:8px 0; text-decoration:none; white-space:normal;}
   .rep-content .item-card:hover{border-color:var(--accent);}
@@ -708,15 +708,15 @@ function richReport(s){
       var dash = body.indexOf(" — "); if (dash < 0) dash = body.indexOf(" - ");
       if (dash > -1){ title = body.slice(0,dash).trim(); desc = body.slice(dash+3).trim(); }
       var ym = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{6,20})/);
-      var img, cls;
-      if (ym){ img = "https://i.ytimg.com/vi/"+ym[1]+"/mqdefault.jpg"; cls = "yt"; }
-      else { var hh = url.match(/^https?:\/\/([^\/]+)/); var hst = hh ? hh[1].replace(/^www\./,"") : "";
-             img = "https://www.google.com/s2/favicons?domain="+hst+"&sz=128"; cls = "news"; }
+      var hh = url.match(/^https?:\/\/([^\/]+)/); var hst = hh ? hh[1].replace(/^www\./,"") : "";
+      var img, cls, go;
+      if (ym){ img = "https://i.ytimg.com/vi/"+ym[1]+"/mqdefault.jpg"; cls = "yt"; go = "youtube.com · ▶ 영상 보기"; }
+      else { img = "https://www.google.com/s2/favicons?domain="+hst+"&sz=128"; cls = "news"; go = hst+" · 기사 보기 ↗"; }
       out.push("<a class='item-card "+cls+"' href='"+esc(url)+"' target='_blank' rel='noopener noreferrer'>"+
         "<img src='"+img+"' alt='' loading='lazy'>"+
         "<span class='ic-body'><span class='ic-title'>"+esc(title)+"</span>"+
         (desc ? "<span class='ic-desc'>"+esc(desc)+"</span>" : "")+
-        "<span class='ic-url'>"+esc(url)+"</span></span></a>");
+        "<span class='ic-url'>"+esc(go)+"</span></span></a>");
     } else {
       out.push(linkify(lines[i]));
     }
