@@ -180,11 +180,19 @@
   .cal-nav-btn{border:1px solid var(--line-strong); background:var(--surface); color:var(--ink-2);
     border-radius:999px; padding:5px 12px; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap;}
   .cal-nav-btn:hover{color:var(--ink); border-color:var(--accent);}
-  .cal-wrap{display:flex; flex-wrap:wrap; align-items:flex-start; gap:20px; padding:14px 20px 2px;}
-  .cal-month{flex:1 1 260px; min-width:236px; max-width:420px;
-    background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:12px 14px 10px;}
-  .cal-mtitle{font-size:12.5px; font-weight:700; color:var(--ink-2); margin-bottom:8px;
-    padding-bottom:7px; border-bottom:1px solid var(--line);}
+  /* 분기 달력: 3개 월이 화면 폭을 균등 분할 (넓은 화면에서 좌측 쏠림 방지) */
+  .cal-wrap{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); align-items:start; gap:20px; padding:14px 20px 6px;}
+  .cal-month{min-width:0;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:14px 18px 12px;}
+  .cal-mtitle{font-size:14px; font-weight:700; color:var(--ink); margin-bottom:10px;
+    padding-bottom:8px; border-bottom:1px solid var(--line);}
+  @media (max-width:1100px){ .cal-wrap{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  @media (max-width:720px){ .cal-wrap{grid-template-columns:1fr;} }
+  /* 분기 달력 전용: 넓어진 카드에 맞춰 날짜 칸·글자 확대 */
+  .cal-wrap .cal-cell{height:50px; font-size:13.5px; gap:4px;}
+  .cal-wrap .cal-dow{font-size:12px; padding:4px 0 6px;}
+  .cal-wrap .cdot{width:6px; height:6px;}
+  .cal-wrap .cal-cell.today .cnum{width:26px; height:26px;}
   .cal-grid{display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:2px;}
   .cal-dow{font-size:10.5px; font-weight:700; color:var(--ink-3); text-align:center; padding:2px 0 4px;}
   .cal-dow.sun{color:var(--urgent);}
