@@ -366,6 +366,23 @@
 
   .masked-note{font-size:11px; color:var(--pending); margin-left:6px;}
 
+  /* ===== 시계·날짜·날씨 위젯 ===== */
+  .wg-strip{padding:16px 20px;}
+  .wg-row{display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px 22px;}
+  .wg-clock-wrap{display:flex; flex-direction:column; gap:3px; min-width:0;}
+  .wg-eyebrow{font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); font-weight:700;}
+  .wg-clock{font-size:clamp(22px,4.4vw,30px); font-weight:800; letter-spacing:-.01em; line-height:1.05; color:var(--ink);
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-variant-numeric:tabular-nums;}
+  .wg-date{font-size:13.5px; color:var(--ink-2); font-weight:600;}
+  .wg-weather{display:flex; align-items:center; gap:13px; flex:none;}
+  .wg-weather .wg-ico{font-size:clamp(30px,5vw,40px); line-height:1;}
+  .wg-weather .wg-wx{display:flex; flex-direction:column; gap:3px;}
+  .wg-temp{font-size:clamp(20px,3.4vw,26px); font-weight:800; letter-spacing:-.02em; line-height:1; color:var(--ink);
+    font-variant-numeric:tabular-nums;}
+  .wg-temp small{font-size:14px; font-weight:700; color:var(--ink-2); margin-left:1px;}
+  .wg-desc{font-size:12.5px; color:var(--ink-3);}
+  .wg-desc b{color:var(--ink-2); font-weight:700;}
+
   /* ===== 반응형 ===== */
   .hamb{display:none;}
   .backdrop{display:none;}
@@ -383,6 +400,10 @@
     .hamb{display:grid; place-items:center; width:38px; height:38px; border-radius:10px;
       border:1px solid var(--line-strong); background:var(--surface); color:var(--ink); font-size:18px; cursor:pointer;}
     .topbar .tb-title{font-size:15px; font-weight:800;}
+  }
+  @media (max-width:640px){
+    .wg-row{flex-direction:column; align-items:flex-start;}
+    .wg-weather{align-self:flex-start;}
   }
   @media (max-width:460px){
     .kpis{grid-template-columns:1fr;} .time-grid{grid-template-columns:1fr;}
@@ -457,7 +478,7 @@ function parseDate(s){ if(!s) return null; var p=String(s).slice(0,10).split("-"
 var DOW = ["일","월","화","수","목","금","토"];
 
 /* ============ API ============ */
-var GAS_URL = "https://script.google.com/macros/s/AKfycbzNZ05uSJ06dC6j5uxtRZ35tkwVJAQsiysBAy9sN2rFTO7A8GwejIX3DDpqyiB3lh2i/exec";
+var GAS_URL = "https://script.google.com/macros/s/AKfycbxES295BZDhGZWvQzgSOyz0tByLOSRtE1oxP44Ht09QpFqzzf56-WAFWWwjw7hjAz4J/exec";
 async function loadData(){
   if (window.__MOCK__){ state.data = window.__MOCK__; state.loading=false; return; }
   var r = await fetch(GAS_URL + "?action=data&key=" + encodeURIComponent(KEY));
@@ -756,6 +777,70 @@ function barChartSVG(rows){
 /* ============ 페이지들 ============ */
 var C = document.getElementById("content");
 
+/* ============ 시계·날짜·날씨 위젯 ============ */
+/* 시계: seoulNow() 재사용, 1초 갱신. 인터벌은 대시보드 렌더 시 시작하며
+   중복 방지를 위해 기존 인터벌을 clear한다. 렌더마다 위젯 DOM이 새로 생기므로
+   갱신 콜백은 요소가 없으면(다른 페이지) 조용히 스킵한다. */
+var clockTimer = null;
+function fmtClock(now){ return pad2(now.getHours())+":"+pad2(now.getMinutes())+":"+pad2(now.getSeconds()); }
+function fmtDateKo(now){ return now.getFullYear()+"년 "+(now.getMonth()+1)+"월 "+now.getDate()+"일 "+DOW[now.getDay()]+"요일"; }
+function tickClock(){
+  var elc = document.querySelector("[data-wgclock]");
+  if (!elc) return;                    // 위젯 없으면 스킵(대시보드 아님)
+  var now = seoulNow();
+  elc.textContent = fmtClock(now);
+  var eld = document.querySelector("[data-wgdate]");
+  if (eld) eld.textContent = fmtDateKo(now);
+}
+function startClock(){
+  if (clockTimer){ clearInterval(clockTimer); clockTimer = null; }  // 중복 생성 방지
+  tickClock();
+  clockTimer = setInterval(tickClock, 1000);
+}
+
+/* 날씨: Open-Meteo(키 불필요, CORS 허용). weathercode→한국어+이모지 매핑.
+   30분 캐시(모듈 변수+timestamp). 실패 시 날씨 영역만 조용히 숨김. */
+var WCODE = {
+  0:["맑음","☀️"], 1:["대체로 맑음","🌤️"], 2:["대체로 맑음","🌤️"], 3:["흐림","☁️"],
+  45:["안개","🌫️"], 48:["안개","🌫️"],
+  51:["이슬비","🌦️"], 53:["이슬비","🌦️"], 55:["이슬비","🌦️"], 56:["이슬비","🌦️"], 57:["이슬비","🌦️"],
+  61:["비","🌧️"], 63:["비","🌧️"], 65:["비","🌧️"], 66:["비","🌧️"], 67:["비","🌧️"],
+  71:["눈","🌨️"], 73:["눈","🌨️"], 75:["눈","🌨️"], 77:["눈","🌨️"],
+  80:["소나기","🌧️"], 81:["소나기","🌧️"], 82:["소나기","🌧️"],
+  85:["소낙눈","🌨️"], 86:["소낙눈","🌨️"],
+  95:["뇌우","⛈️"], 96:["뇌우","⛈️"], 99:["뇌우","⛈️"]
+};
+function wxOf(code){ return WCODE[code] || ["","🌡️"]; }
+var WEATHER_URL = "https://api.open-meteo.com/v1/forecast?latitude=37.5665&longitude=126.978&current_weather=true";
+var WEATHER_TTL = 30*60*1000;
+var weatherCache = { data:null, ts:0 };
+function paintWeather(cw){
+  var box = document.querySelector("[data-wgweather]");
+  if (!box || !cw) return;
+  var wx = wxOf(cw.weathercode);
+  var ico = document.querySelector("[data-wgico]");
+  var temp = document.querySelector("[data-wgtemp]");
+  var desc = document.querySelector("[data-wgdesc]");
+  if (ico) ico.textContent = wx[1];
+  if (temp) temp.innerHTML = esc((Number(cw.temperature)||0).toFixed(1))+"<small>°C</small>";
+  if (desc) desc.innerHTML = "<b>서울</b> · "+esc(wx[0]);
+  box.style.display = "";
+}
+async function mountWeather(){
+  if (weatherCache.data && (Date.now()-weatherCache.ts) < WEATHER_TTL){
+    paintWeather(weatherCache.data); return;   // 30분 캐시 재사용(재요청 안 함)
+  }
+  try{
+    var r = await fetch(WEATHER_URL);
+    if (!r.ok) return;                          // 조용히 숨김
+    var j = await r.json();
+    var cw = j && j.current_weather;
+    if (!cw) return;
+    weatherCache = { data:cw, ts:Date.now() };
+    paintWeather(cw);
+  }catch(e){ /* 실패 시 날씨 영역만 조용히 숨김(콘솔 에러 없음) */ }
+}
+
 function renderDashboard(){
   var d = state.data;
   var now = seoulNow();
@@ -783,8 +868,18 @@ function renderDashboard(){
 
   var html = pageHead("dashboard", "기준 "+ymd(now)+" (Asia/Seoul) · 모든 수치는 실데이터 계산", "");
 
+  // 시계·날짜·날씨 위젯 스트립
+  html += "<section class='panel wg-strip'><div class='wg-row'>"+
+    "<div class='wg-clock-wrap'><div class='wg-eyebrow'>서울 · Asia/Seoul</div>"+
+    "<div class='wg-clock' data-wgclock>--:--:--</div>"+
+    "<div class='wg-date' data-wgdate></div></div>"+
+    "<div class='wg-weather' data-wgweather style='display:none'>"+
+    "<div class='wg-ico' data-wgico></div>"+
+    "<div class='wg-wx'><div class='wg-temp' data-wgtemp></div><div class='wg-desc' data-wgdesc></div></div>"+
+    "</div></div></section>";
+
   // 캘린더 + 일정
-  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>캘린더</div><h3>다가오는 일정</h3></div><div class='sec-note'>구글 캘린더 연동 항목은 갱신 시점 스냅샷</div></div><div data-dashcal></div><div class='cal-divider'></div><div data-dashsched></div></section>";
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>캘린더</div><h3>다가오는 일정</h3></div><div class='sec-note'>구글 캘린더 양방향 실시간 연동</div></div><div data-dashcal></div><div class='cal-divider'></div><div data-dashsched></div></section>";
 
   // 시간 진행률
   html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>시간 진행률</div><h3>올해 · 이번 달 · 이번 주 · 오늘</h3></div><div class='sec-note' data-timenow></div></div><div class='time-grid' data-timegrid></div></section>";
@@ -851,6 +946,8 @@ function renderDashboard(){
   C.querySelector("[data-dashsched]").innerHTML = schedListHtml(6);
   mountTimeProgress(C.querySelector("[data-timegrid]"), C.querySelector("[data-timenow]"));
   bindFold(C);
+  startClock();       // 시계 1초 갱신 시작(중복 인터벌은 내부에서 clear)
+  mountWeather();     // 날씨 표시(30분 캐시, 실패 시 조용히 숨김)
 }
 
 function schedListHtml(limit){
@@ -943,7 +1040,7 @@ function renderTodos(){
 /* ---- 일정관리 ---- */
 function renderCalendar(){
   var d = state.data;
-  var html = pageHead("calendar","분기 달력 + 일정 목록 · 구글 캘린더 동기화 항목은 갱신 시점 스냅샷","<button class='btn primary' data-add>+ 일정 추가</button>");
+  var html = pageHead("calendar","분기 달력 + 일정 목록 · 구글 캘린더 양방향 실시간 연동 (여기서 추가하면 캘린더에도 등록)","<button class='btn primary' data-add>+ 일정 추가</button>");
   html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>캘린더</div><h3>분기 달력</h3></div></div><div data-cal></div></section>";
   html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>목록</div><h3>다가오는 일정</h3></div></div><div data-sched></div></section>";
   html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>전체</div><h3>등록된 일정</h3></div></div><div class='tbl-scroll' data-caltbl></div></section>";
