@@ -1230,7 +1230,7 @@ function renderDashboard(){
     "<span class='sub2'>AI 교육 = 생성형 AI(영상) + 바이브코딩(개발) 두 트랙 · 목표 2026말 10% → 2027 30% → 최종 50%</span></div></section>";
 
   // 월별 차트
-  html += "<section class='panel' data-foldsec><div class='sec-head fold-head' data-fold><div><div class='eyebrow'>추이</div><h3>월별 매출 · 매입</h3></div><div style='display:flex;align-items:center;gap:10px'><div class='sec-note'>단위: 만원</div><span class='fold-btn'>▾</span></div></div>"+
+  html += "<section class='panel collapsed' data-foldsec><div class='sec-head fold-head' data-fold><div><div class='eyebrow'>추이</div><h3>월별 매출 · 매입 <span style='font-weight:400;color:var(--ink-3);font-size:12px'>(클릭하여 펼치기)</span></h3></div><div style='display:flex;align-items:center;gap:10px'><div class='sec-note'>단위: 만원</div><span class='fold-btn'>▾</span></div></div>"+
     "<div class='chart-body fold-body'><div class='legend'><span><span class='swatch' style='background:var(--rev)'></span>매출(확정)</span><span><span class='swatch hatch'></span>매출(대기)</span><span><span class='swatch' style='background:var(--cost)'></span>매입</span></div><div class='chart-scroll'>"+barChartSVG(monthlyAgg())+"</div></div></section>";
 
   // 미수금 테이블
