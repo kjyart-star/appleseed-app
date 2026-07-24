@@ -379,6 +379,7 @@
   .rtype-badge.weekly{color:var(--aivfx); background:var(--aivfx-soft);}
   .rtype-badge.monthly{color:var(--aiedu); background:var(--aiedu-soft);}
   .rtype-badge.adhoc{color:var(--ink-3); background:var(--surface-2);}
+  .rtype-badge.brief{color:var(--aicontent); background:var(--aicontent-soft);}
   @media (max-width:820px){ .rep-wrap{grid-template-columns:1fr;} }
 
   /* ===== 요약 소계 스트립 ===== */
@@ -654,7 +655,7 @@ function taxUnissued(){
   var sum = rows.reduce(function(a,r){ return a+(Number(r.amount)||0); },0);
   return { n:rows.length, sum:sum, rows:rows };
 }
-function rtypeCls(t){ return t==="일간"?"daily": t==="주간"?"weekly": t==="월간"?"monthly":"adhoc"; }
+function rtypeCls(t){ return t==="일간"?"daily": t==="주간"?"weekly": t==="월간"?"monthly": t==="브리핑"?"brief":"adhoc"; }
 
 /* Asia/Seoul 현재 시각 */
 function seoulNow(){
@@ -1807,7 +1808,7 @@ function renderReports(){
   }
   var all = (d.reports||[]).slice().sort(function(a,b){ return String(b.report_date||"").localeCompare(String(a.report_date||"")); });
   html += "<div class='rep-chips' data-rep-chips>"+
-    ["전체","일간","주간","월간","수시"].map(function(s){ return "<button class='proj-chip"+(s===reportFilter?" on":"")+"' data-rep-filter='"+esc(s)+"'>"+esc(s)+"</button>"; }).join("")+
+    ["전체","일간","주간","월간","수시","브리핑"].map(function(s){ return "<button class='proj-chip"+(s===reportFilter?" on":"")+"' data-rep-filter='"+esc(s)+"'>"+esc(s)+"</button>"; }).join("")+
     "</div>";
   html += "<div class='rep-wrap'><aside class='rep-list' data-rep-list></aside><main class='rep-detail' data-rep-detail></main></div>";
   C.innerHTML = html;
