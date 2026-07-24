@@ -478,7 +478,7 @@ function parseDate(s){ if(!s) return null; var p=String(s).slice(0,10).split("-"
 var DOW = ["일","월","화","수","목","금","토"];
 
 /* ============ API ============ */
-var GAS_URL = "https://script.google.com/macros/s/AKfycbxES295BZDhGZWvQzgSOyz0tByLOSRtE1oxP44Ht09QpFqzzf56-WAFWWwjw7hjAz4J/exec";
+var GAS_URL = "https://script.google.com/macros/s/AKfycbxSFlxufO92jU6O9oGSExXKNd6nLRB9jZdIvb4eu5TRrbf2f0j6mqv75JZ2Zf61etlu/exec";
 async function loadData(){
   if (window.__MOCK__){ state.data = window.__MOCK__; state.loading=false; return; }
   var r = await fetch(GAS_URL + "?action=data&key=" + encodeURIComponent(KEY));
