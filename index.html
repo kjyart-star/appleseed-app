@@ -884,11 +884,11 @@ function renderDashboard(){
     "<div class='wg-wx'><div class='wg-temp' data-wgtemp></div><div class='wg-desc' data-wgdesc></div></div>"+
     "</div></div></section>";
 
+  // 시간 진행률 (시계·날씨 바로 아래)
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>시간 진행률</div><h3>올해 · 이번 달 · 이번 주 · 오늘</h3></div><div class='sec-note' data-timenow></div></div><div class='time-grid' data-timegrid></div></section>";
+
   // 캘린더 + 일정
   html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>캘린더</div><h3>다가오는 일정</h3></div><div class='sec-note'>구글 캘린더 양방향 실시간 연동</div></div><div data-dashcal></div><div class='cal-divider'></div><div data-dashsched></div></section>";
-
-  // 시간 진행률
-  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>시간 진행률</div><h3>올해 · 이번 달 · 이번 주 · 오늘</h3></div><div class='sec-note' data-timenow></div></div><div class='time-grid' data-timegrid></div></section>";
 
   // KPI
   html += "<div class='kpis'>"+
