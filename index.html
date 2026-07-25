@@ -836,14 +836,22 @@ async function apiSend(method, table, id, body){
   if (j && j.error) throw new Error(j.error);
   return j;
 }
+var pendingIds = {};   /* 임시 id → 실제 id 확정을 기다리는 Promise (추가 직후 수정·삭제 경합 방지) */
 async function crud(method, table, id, body){
+  /* 방금 추가한 행(임시 id)을 곧바로 수정·삭제하는 경우: 서버 확정 id를 기다렸다가 그 id로 실행 */
+  if (id != null && String(id).indexOf("tmp-") === 0 && pendingIds[id]){
+    var realId = await pendingIds[id];
+    if (realId == null) return;   /* 원본 저장이 실패한 행 → 처리할 대상 없음 */
+    id = realId;
+  }
   /* 진짜 낙관적 반영: 서버 응답을 기다리지 않고 화면부터 즉시 갱신 (실패 시 원복) */
   var list = state.data && state.data[table];
   var backup = list ? list.slice() : null;
-  var tempId = null;
+  var tempId = null, resolvePending = null;
   if (list){
     if (method === "POST"){
       tempId = "tmp-" + Date.now();
+      pendingIds[tempId] = new Promise(function(r){ resolvePending = r; });
       var tmp = {}; if (body) for (var k0 in body) tmp[k0] = body[k0];
       tmp.id = tempId;
       list.push(tmp);
@@ -870,9 +878,11 @@ async function crud(method, table, id, body){
         render();
       }
     }catch(eOpt){}
+    if (resolvePending) resolvePending(res && res.row ? res.row.id : null);
     /* 백그라운드 정합 재확인 (구글시트 지연 반영 대비) */
     setTimeout(function(){ loadData().then(render).catch(function(){}); }, 1500);
   }catch(e){
+    if (resolvePending) resolvePending(null);
     var msg = String((e && e.message) || e);
     if (method === "DELETE" && /not found/i.test(msg)){
       /* 서버에 이미 없는 행 → 삭제 완료로 간주하고 조용히 동기화 */
