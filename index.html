@@ -873,8 +873,15 @@ async function crud(method, table, id, body){
     /* 백그라운드 정합 재확인 (구글시트 지연 반영 대비) */
     setTimeout(function(){ loadData().then(render).catch(function(){}); }, 1500);
   }catch(e){
+    var msg = String((e && e.message) || e);
+    if (method === "DELETE" && /not found/i.test(msg)){
+      /* 서버에 이미 없는 행 → 삭제 완료로 간주하고 조용히 동기화 */
+      loadData().then(render).catch(function(){});
+      return;
+    }
     if (backup){ state.data[table] = backup; render(); }
-    alert("저장 실패: " + e.message);
+    alert("저장 실패: " + msg);
+    loadData().then(render).catch(function(){});   /* 서버 기준으로 재동기화 */
   }
 }
 
@@ -2492,6 +2499,11 @@ window.addEventListener("hashchange", render);
     catch(e){ state.loading=false; state.error=e.message; }
     render();
   })();
+  /* 데이터 자동 동기화: 1분마다 서버 기준으로 갱신 (탭이 보일 때만) —
+     다른 기기·Claude가 바꾼 내용이 화면에 오래 남아있지 않게 함 */
+  setInterval(function(){
+    if (!document.hidden) loadData().then(render).catch(function(){});
+  }, 60000);
 })();
 
 /* ============ 배포 갱신 자동 감지 ============
