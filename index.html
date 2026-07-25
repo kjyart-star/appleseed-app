@@ -837,31 +837,62 @@ async function apiSend(method, table, id, body){
   return j;
 }
 async function crud(method, table, id, body){
+  /* 진짜 낙관적 반영: 서버 응답을 기다리지 않고 화면부터 즉시 갱신 (실패 시 원복) */
+  var list = state.data && state.data[table];
+  var backup = list ? list.slice() : null;
+  var tempId = null;
+  if (list){
+    if (method === "POST"){
+      tempId = "tmp-" + Date.now();
+      var tmp = {}; if (body) for (var k0 in body) tmp[k0] = body[k0];
+      tmp.id = tempId;
+      list.push(tmp);
+    } else if (method === "PATCH"){
+      for (var i0=0;i0<list.length;i0++){
+        if (String(list[i0].id) === String(id)){ if (body) for (var k1 in body) list[i0][k1] = body[k1]; break; }
+      }
+    } else if (method === "DELETE"){
+      state.data[table] = list.filter(function(r){ return String(r.id) !== String(id); });
+    }
+    render();
+  }
   try{
     var res = await apiSend(method, table, id, body);
-    /* 낙관적 반영: 서버 응답을 즉시 로컬 상태에 적용 → 새로고침 없이 바로 보임 */
+    /* 서버 확정값으로 교체 (임시 id → 실제 id) */
     try{
-      var list = state.data && state.data[table];
-      if (list){
+      var cur = state.data && state.data[table];
+      if (cur && res && res.row){
         if (method === "POST"){
-          if (res && res.row) list.push(res.row);
+          for (var i=0;i<cur.length;i++){ if (String(cur[i].id) === String(tempId)){ cur[i] = res.row; break; } }
         } else if (method === "PATCH"){
-          for (var i=0;i<list.length;i++){
-            if (String(list[i].id) === String(id)){
-              if (res && res.row) list[i] = res.row;
-              else if (body) for (var k in body) list[i][k] = body[k];
-              break;
-            }
-          }
-        } else if (method === "DELETE"){
-          state.data[table] = list.filter(function(r){ return String(r.id) !== String(id); });
+          for (var j=0;j<cur.length;j++){ if (String(cur[j].id) === String(id)){ cur[j] = res.row; break; } }
         }
+        render();
       }
     }catch(eOpt){}
-    render();
     /* 백그라운드 정합 재확인 (구글시트 지연 반영 대비) */
-    setTimeout(function(){ loadData().then(render).catch(function(){}); }, 1200);
-  }catch(e){ alert("오류: "+e.message); }
+    setTimeout(function(){ loadData().then(render).catch(function(){}); }, 1500);
+  }catch(e){
+    if (backup){ state.data[table] = backup; render(); }
+    alert("저장 실패: " + e.message);
+  }
+}
+
+/* 자체 확인 팝업 — 브라우저 confirm()이 차단되는 환경에서도 항상 동작 */
+function confirmDlg(msg, okLabel, title){
+  return new Promise(function(resolve){
+    var bg = el("<div class='modal-bg'><div class='modal' style='max-width:380px'>"+
+      "<div class='modal-h'><h3>"+esc(title||"확인")+"</h3><button class='icon-btn' data-cf-x>✕</button></div>"+
+      "<div class='modal-b'><p style='margin:4px 0 2px; line-height:1.65'>"+esc(msg)+"</p></div>"+
+      "<div class='modal-f'><button class='btn ghost' data-cf-no>취소</button>"+
+      "<button class='btn primary danger' data-cf-yes>"+esc(okLabel||"확인")+"</button></div></div></div>");
+    document.body.appendChild(bg);
+    function done(v){ bg.remove(); resolve(v); }
+    bg.querySelector("[data-cf-x]").onclick = function(){ done(false); };
+    bg.querySelector("[data-cf-no]").onclick = function(){ done(false); };
+    bg.querySelector("[data-cf-yes]").onclick = function(){ done(true); };
+    bg.addEventListener("mousedown", function(e){ if (e.target === bg) done(false); });
+  });
 }
 
 /* ============ 마스킹 ============ */
@@ -1021,7 +1052,11 @@ function openForm(table, row, defaults){
 }
 function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos"}; return m[t]||t; }
 
-async function delRow(table, id){ if(!confirm("정말 삭제할까요? 되돌릴 수 없습니다.")) return; await crud("DELETE", table, id); }
+async function delRow(table, id){
+  var ok = await confirmDlg("정말 삭제할까요? 되돌릴 수 없습니다.", "삭제", "삭제 확인");
+  if (!ok) return;
+  await crud("DELETE", table, id);
+}
 
 /* ============ 분기 달력 컴포넌트 ============ */
 function collectMarkers(){
@@ -1934,7 +1969,9 @@ function renderDeposits(){
   C.innerHTML = html;
   C.querySelectorAll("[data-confirm]").forEach(function(b){
     b.onclick = function(){ var id=b.getAttribute("data-confirm");
-      if(confirm("입금완료로 처리할까요?")) crud("PATCH","revenue",id,{status:"입금완료"}); };
+      confirmDlg("입금완료로 처리할까요?", "입금완료", "입금 확인").then(function(ok){
+        if (ok) crud("PATCH","revenue",id,{status:"입금완료"});
+      }); };
   });
 }
 
