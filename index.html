@@ -390,7 +390,11 @@
   .rep-content .yt-thumb img{width:250px; max-width:100%; border-radius:10px;
     border:1px solid var(--line); display:block;}
   .rep-content .yt-thumb span{font-size:12px; color:var(--accent-ink); font-weight:700;}
-  /* 리치 아이템 카드: [썸네일 | 제목·설명·링크] */
+  /* 리치 아이템 카드: [썸네일 | 제목·설명·링크] — 연속 카드는 card-grid로 2열 배치 */
+  .rep-content .card-grid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:10px; margin:8px 0; white-space:normal;}
+  .rep-content .card-grid .item-card{margin:0;}
+  .rep-content .card-grid .item-card.yt img{width:150px;}
   .rep-content .item-card{display:flex; gap:14px; align-items:flex-start; width:100%;
     border:1px solid var(--line); border-radius:12px; background:var(--surface-2);
     padding:13px 15px; margin:8px 0; text-decoration:none; white-space:normal;}
@@ -403,6 +407,9 @@
   .rep-content .ic-title{font-weight:700; color:var(--ink); font-size:14.5px; line-height:1.45;}
   .rep-content .ic-desc{font-size:13px; color:var(--ink-2); line-height:1.55;}
   .rep-content .ic-url{font-size:11.5px; color:var(--ink-3); word-break:break-all; text-decoration:none;}
+  @media (max-width:860px){
+    .rep-content .card-grid{grid-template-columns:1fr;}
+  }
   @media (max-width:600px){
     .rep-content .item-card{flex-direction:column;}
     .rep-content .item-card.yt img{width:100%;}
@@ -634,7 +641,8 @@
   .ct-controls .proj-search{max-width:340px; flex:1 1 240px;}
   .ct-cats{display:flex; flex-wrap:wrap; gap:7px; flex:1 1 auto;}
   .ct-cats .proj-chip{padding:5px 11px; font-size:12px;}
-  .ct-list{display:flex; flex-direction:column; gap:10px; padding:6px 6px 8px;}
+  .ct-list{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding:6px 6px 8px;}
+  @media (max-width:860px){ .ct-list{grid-template-columns:1fr;} }
   .ct-card{display:flex; gap:14px; align-items:flex-start; width:100%; text-decoration:none; color:inherit;
     border:1px solid var(--line); border-radius:12px; padding:14px 16px; background:var(--surface-2);}
   a.ct-card{cursor:pointer;}
@@ -740,7 +748,14 @@ function linkify(s){
 function richReport(s){
   /* Gemini가 마크다운(**볼드, * 불릿)으로 쓰는 경우 정규화 */
   var lines = String(s==null?"":s).replace(/\*\*/g,"").split("\n");
-  var out = [];
+  var out = [], cardBuf = [];
+  /* 연속된 카드 라인은 2열 그리드(card-grid)로 묶는다 */
+  function flushCards(){
+    if (cardBuf.length){
+      out.push("<span class='card-grid'>"+cardBuf.join("")+"</span>");
+      cardBuf = [];
+    }
+  }
   for (var i=0;i<lines.length;i++){
     var t = lines[i].trim();
     var um = t.match(/(https?:\/\/[^\s)<>"'　]+)/);
@@ -758,15 +773,18 @@ function richReport(s){
       var img, cls, go;
       if (ym){ img = "https://i.ytimg.com/vi/"+ym[1]+"/mqdefault.jpg"; cls = "yt"; go = "youtube.com · ▶ 영상 보기"; }
       else { img = "https://www.google.com/s2/favicons?domain="+hst+"&sz=128"; cls = "news"; go = hst+" · 기사 보기 ↗"; }
-      out.push("<a class='item-card "+cls+"' href='"+esc(url)+"' target='_blank' rel='noopener noreferrer'>"+
+      cardBuf.push("<a class='item-card "+cls+"' href='"+esc(url)+"' target='_blank' rel='noopener noreferrer'>"+
         "<img src='"+img+"' alt='' loading='lazy'>"+
         "<span class='ic-body'><span class='ic-title'>"+esc(title)+"</span>"+
         (desc ? "<span class='ic-desc'>"+esc(desc)+"</span>" : "")+
         "<span class='ic-url'>"+esc(go)+"</span></span></a>");
     } else {
+      if (t === "" && cardBuf.length){ continue; } /* 카드 사이 빈 줄로 그리드가 끊기지 않게 */
+      flushCards();
       out.push(linkify(lines[i]));
     }
   }
+  flushCards();
   return out.join("\n");
 }
 function comma(n){ n = Number(n)||0; return Math.round(n).toLocaleString("ko-KR"); }
@@ -882,7 +900,7 @@ var MENU = [
       ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",1] ] },
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
   { cap:"커뮤니케이션", items:[ ["mail","✉️","메일관리",1], ["namecard","🪪","명함관리",1], ["newsletter","📰","뉴스레터",1] ] },
-  { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["gov","🏛️","AI 지원사업",0], ["library","📚","자료실",1], ["reports","📑","리포트",0] ] },
+  { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["gov","🏛️","AI 지원사업",0], ["newsrep","📰","뉴스리포트",0], ["library","📚","자료실",1], ["reports","📑","리포트",0] ] },
   { cap:"시스템", items:[ ["cert","🏷️","재직증명서",1] ] }
 ];
 var TITLES = {};
@@ -1984,18 +2002,29 @@ function renderProfit(){
 var reportSelId = null, reportFilter = "전체";
 function renderReports(){
   var d = state.data;
-  var noteDesc = "리포트는 Claude에게 '/재무점검' 또는 '/리포트'로 요청하면 자동 생성됩니다.";
-  var html = pageHead("reports", noteDesc, "");
+  /* 같은 렌더러를 두 메뉴가 공유: reports=재무·업무 리포트 / newsrep=뉴스리포트(브리핑) */
+  var mode = curRoute()==="newsrep" ? "news" : "biz";
+  var noteDesc = mode==="news"
+    ? "AI 업계 브리핑 — 매일 아침 7시 자동 발행됩니다 (뉴스·유튜브·정부지원사업)."
+    : "리포트는 Claude에게 '/재무점검' 또는 '/리포트'로 요청하면 자동 생성됩니다.";
+  var html = pageHead(curRoute(), noteDesc, "");
   /* 백엔드 v4 미배포: reports 키 자체가 없으면 안내만 표시(에러 없음) */
   if (!d.reports){
     html += "<section class='panel' style='background:transparent;border:0;box-shadow:none'><div class='placeholder'><div class='ico'>🧩</div><h3>백엔드 업그레이드(v4) 후 사용 가능</h3><p>리포트 기능은 백엔드(v4)를 배포한 뒤 사용할 수 있습니다. 배포 전에는 표시할 데이터가 없습니다.</p></div></section>";
     C.innerHTML = html;
     return;
   }
-  var all = (d.reports||[]).slice().sort(function(a,b){ return String(b.report_date||"").localeCompare(String(a.report_date||"")); });
-  html += "<div class='rep-chips' data-rep-chips>"+
-    ["전체","일간","주간","월간","수시","브리핑"].map(function(s){ return "<button class='proj-chip"+(s===reportFilter?" on":"")+"' data-rep-filter='"+esc(s)+"'>"+esc(s)+"</button>"; }).join("")+
-    "</div>";
+  var all = (d.reports||[]).slice()
+    .filter(function(r){ return mode==="news" ? String(r.rtype||"")==="브리핑" : String(r.rtype||"")!=="브리핑"; })
+    .sort(function(a,b){ return String(b.report_date||"").localeCompare(String(a.report_date||"")); });
+  if (mode==="biz"){
+    if (reportFilter==="브리핑") reportFilter = "전체";
+    html += "<div class='rep-chips' data-rep-chips>"+
+      ["전체","일간","주간","월간","수시"].map(function(s){ return "<button class='proj-chip"+(s===reportFilter?" on":"")+"' data-rep-filter='"+esc(s)+"'>"+esc(s)+"</button>"; }).join("")+
+      "</div>";
+  } else {
+    reportFilter = "전체"; /* 뉴스리포트는 브리핑만이므로 필터 없음 */
+  }
   html += "<div class='rep-wrap'><aside class='rep-list' data-rep-list></aside><main class='rep-detail' data-rep-detail></main></div>";
   C.innerHTML = html;
   var listEl = C.querySelector("[data-rep-list]");
@@ -2333,7 +2362,7 @@ var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
   memos:renderMemos, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
-  contests:renderContests, gov:renderGov
+  newsrep:renderReports, contests:renderContests, gov:renderGov
 };
 function render(){
   var route = curRoute();
