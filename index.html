@@ -948,7 +948,7 @@ var MENU = [
       ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",1] ] },
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
   { cap:"커뮤니케이션", items:[ ["mail","✉️","메일관리",1], ["namecard","🪪","명함관리",1], ["newsletter","📰","뉴스레터",1] ] },
-  { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["gov","🏛️","AI 지원사업",0], ["newsrep","📰","뉴스리포트",0], ["youtube","▶️","AI 유튜브",0], ["library","📚","자료실",1], ["reports","📑","리포트",0] ] },
+  { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["festivals","🎥","AI 영화제",0], ["gov","🏛️","AI 지원사업",0], ["newsrep","📰","뉴스리포트",0], ["youtube","▶️","AI 유튜브",0], ["library","📚","자료실",1], ["reports","📑","리포트",0] ] },
   { cap:"시스템", items:[ ["cert","🏷️","재직증명서",1] ] }
 ];
 var TITLES = {};
@@ -2167,6 +2167,90 @@ function renderYoutube(){
   bindFold(C);
 }
 
+/* ---- AI 영화제 (전세계 큐레이션 — 데이터는 배포 시 갱신) ---- */
+var FESTIVALS_UPDATED = "2026-07-26";
+/* 폴백 시드 (서버 시트 데이터가 없을 때만 사용 — 원본은 구글시트 '영화제' 탭, 매일 자동 갱신) */
+var FESTIVALS = [
+  {name:"대한민국 AI 콘텐츠 어워즈 (구 대한민국 AI국제영화제)",region:"국내",place:"수원, 대한민국",host:"경기도·경기콘텐츠진흥원",deadline:"2026-07-12",event:"2026-10-15 ~ 10-16",url:"https://www.gcon.or.kr/aiff.html",note:"중편·단편 경쟁 + 백남준 특별상 3개 부문, 롯데시네마 수원 개최"},
+  {name:"부천국제판타스틱영화제 AI 영화 국제경쟁 (BIFAN)",region:"국내",place:"부천, 대한민국",host:"부천국제판타스틱영화제 조직위원회",deadline:"미정",event:"2026-07-02 ~ 07-12",url:"https://www.bifan.kr",note:"제30회(2026) 종료. AI 장편 상영 첫 시도·숏폼 공식 섹션 승격 (차기 회차 미공고)"},
+  {name:"제주 AI 국제필름페스티벌·글로벌 AI 영상 공모전",region:"국내",place:"제주, 대한민국",host:"제주특별자치도·제주콘텐츠진흥원",deadline:"2026-07-13",event:"2026-09-15 ~ 09-17",url:"https://www.jjaiff.kr/",note:"대상 2,000만원·최우수상 4편 각 600만원. 101개국 1,185편 접수"},
+  {name:"WAIFF Seoul 세계 AI 영화제 서울",region:"국내",place:"서울, 대한민국",host:"비전컬쳐(WAIFF 글로벌 네트워크)",deadline:"2026-02-10",event:"2026-03-06 ~ 03-07",url:"https://www.worldaifilmfestival.kr/en",note:"국내 최대 규모 AI 영화 시상. 수상 5팀 WAIFF 칸 그랜드 파이널 공식 초청"},
+  {name:"미추홀구 AI 영화제 (제1회)",region:"국내",place:"인천, 대한민국",host:"인천 미추홀구",deadline:"2026-05-29",event:"미정",url:"https://www.michuhol.go.kr/main/board/view.do?sq=300733&board_code=board_13",note:"3~5분 AI 영화 공모. 최우수상 150만원, 10-20 수상작 발표 예정"},
+  {name:"런웨이 AI 영화제 (Runway AI Film Festival)",region:"해외",place:"뉴욕·로스앤젤레스, 미국",host:"Runway",deadline:"2026-04-27",event:"2026-06-11 ~ 06-18",url:"https://aif.runwayml.com/",note:"총상금 $135,000(그랑프리 $20,000). 3~15분·생성형 영상 필수, 출품료 무료"},
+  {name:"월드 AI 필름 페스티벌 (WAiFF)",region:"해외",place:"칸, 프랑스",host:"WAIFF 조직위원회",deadline:"미정",event:"2026-04-21 ~ 04-22",url:"https://worldaifilmfestival.com/",note:"2회(2026) 80개국 5,500편 출품. 그랑프리 1만 유로 (차기 회차 미공고)"},
+  {name:"리플라이 AI 필름 페스티벌 (Reply AI Film Festival)",region:"해외",place:"베니스, 이탈리아",host:"Reply (Mastercard 협력)",deadline:"2026-06-02",event:"2026-09-02 ~ 09-12",url:"https://challenges.reply.com/challenges/creative/aifilmfestival/home/",note:"상금 풀 3만 유로+. 제83회 베니스영화제 기간 중 프리미어·시상"},
+  {name:"프로젝트 오디세이 (Project Odyssey by Civitai)",region:"해외",place:"온라인",host:"Civitai·ElevenLabs 등",deadline:"2026-01-19",event:"미정",url:"https://civitai.com/articles/9383/project-odyssey-season-2-the-ai-filmmaking-competition-returns",note:"시즌2 상금 $70,000+, 9개 부문(내러티브·뮤직비디오·광고 등)"},
+  {name:"크로마 어워즈 시즌2 (Chroma Awards Season 2)",region:"해외",place:"온라인",host:"Devpost·ElevenLabs·FAL·Freepik 등",deadline:"2026-12-31",event:"미정",url:"https://chromaawards.com",note:"현금 상금 $175,000+·툴 크레딧 $100만+, 약 25개 부문, 무료 출품·접수 중"},
+  {name:"AI 포 굿 필름 페스티벌 (AI for Good Film Festival)",region:"해외",place:"제네바, 스위스",host:"ITU (국제전기통신연합, UN)",deadline:"2026-03-15",event:"2026-07-07",url:"https://aiforgood.itu.int/ai-for-good-film-festival",note:"UN AI for Good 글로벌 서밋 연계 AI 단편 공모·상영"},
+  {name:"힉스필드 AI 필름 컴피티션 (Higgsfield AI Film Competition)",region:"해외",place:"온라인",host:"Higgsfield AI",deadline:"2026-03-18",event:"미정",url:"https://higgsfield.ai/creative-challenge",note:"총상금 $500,000(그랑프리 $150,000)로 AI 영화 공모전 최대급"},
+  {name:"아르테팩트 AI 필름 페스티벌 (Artefact AI Film Festival)",region:"해외",place:"파리, 프랑스",host:"Artefact",deadline:"미정",event:"2026-02-12",url:"https://artefact-ai-film-festival.com",note:"그랑프리 1만 유로. 2026 회차 종료, 차기 일정 미공고"},
+  {name:"AI 인터내셔널 필름 페스티벌 (AIIFF)",region:"해외",place:"로스앤젤레스, 미국",host:"AIIFF",deadline:"미정",event:"2026-03-01",url:"https://aifilmfest.org",note:"IMDb 등재 자격 영화제. 2026 회차 종료, 차기 일정 미공고"},
+  {name:"발리 국제 AI 영화제 (BIAIFF)",region:"해외",place:"우붓(발리), 인도네시아",host:"BIAIFF (Paradiso Ubud Cinema)",deadline:"미정",event:"2026-05-01 ~ 12-31",url:"https://filmfreeway.com/BaliAiFilmFestival",note:"연중 상영형 AI 영화제. FilmFreeway 접수"},
+  {name:"AI ZONE 국제 AI 영화제",region:"해외",place:"온라인",host:"AI ZONE",deadline:"미정",event:"2026-06-01 ~ 12-31",url:"https://filmfreeway.com/AIZONEInternationalAIFilmFestival2026",note:"온라인 개최, Best AI Mini Movie 제작 지원금. FilmFreeway 접수 중"},
+  {name:"인공지능 미디어 페스티벌 (AIMF)",region:"해외",place:"로스앤젤레스, 미국",host:"AIMF",deadline:"미정",event:"2026-09-11 ~ 09-13",url:"https://aimf.digital",note:"AI 영상·미디어 종합 페스티벌, Crystal Award 수여"},
+  {name:"레드록스 AI 필름 페스티벌 (Red Rocks AI Film Festival)",region:"해외",place:"세인트조지(유타), 미국",host:"Red Rocks AI Film Festival",deadline:"미정",event:"2026-09-24",url:"https://filmfreeway.com/RedRocksAIFilmFestival",note:"수상 인증서·로렐 수여, FilmFreeway 접수"},
+  {name:"AI 필름 3 — AI 필름 앤 아트 페스티벌 애리조나",region:"해외",place:"애리조나, 미국",host:"AI Film 3",deadline:"미정",event:"2026-10-01 ~ 11-01",url:"https://aifilm3.com",note:"AI 영화·아트 결합 페스티벌, 3회차"},
+  {name:"AI 필름 & 애즈 어워즈 발리 (AI Film & Ads Awards)",region:"해외",place:"발리, 인도네시아",host:"filmawards.ai",deadline:"미정",event:"2026-11-07",url:"https://filmawards.ai",note:"AI 영화·광고 부문 시상. 5-21 칸 에디션도 별도 개최"},
+  {name:"AI 필름 페스티벌 재팬 (AI Film Festival Japan)",region:"해외",place:"도쿄, 일본",host:"AI Film Festival Japan",deadline:"미정",event:"2026-04-25",url:"https://filmfreeway.com/AIFilmFestivalJapan2026",note:"2026 회차 종료, 차기 일정 미공고. FilmFreeway 접수"},
+  {name:"글로벌 AI 필름 어워드 (1 Billion Followers Summit)",region:"해외",place:"두바이, 아랍에미리트",host:"1 Billion Followers Summit (UAE 정부)",deadline:"미정",event:"2026-01-09 ~ 01-11",url:"https://1billionsummit.com/ai-film-award",note:"상금 100만 달러로 세계 최대 규모 AI 영화상. 차기 일정 미공고"}
+];
+function festivalCard(f, today){
+  var isD = /^\d{4}-\d{2}-\d{2}$/.test(String(f.deadline||""));
+  var di = isD ? ddayInfo(f.deadline, today, false) : { cls:"far", txt:"미정" };
+  var titleBits = esc(f.name) + "<span class='ct-tag'>"+esc(f.region||"")+"</span>";
+  var metaBits = [];
+  if (f.host) metaBits.push("<b>"+esc(f.host)+"</b>");
+  if (f.place) metaBits.push(esc(f.place));
+  if (isD) metaBits.push("마감 "+esc(f.deadline));
+  if (f.event && f.event!=="미정") metaBits.push("개최 "+esc(f.event));
+  var inner = "<div class='dday "+di.cls+" tnum'>"+di.txt+"</div>"+
+    "<div class='ct-main'><div class='ct-title'>"+titleBits+"</div>"+
+    "<div class='ct-meta'>"+metaBits.join("<span>·</span>")+"</div>"+
+    (f.note?"<div class='ct-sum'>"+esc(f.note)+"</div>":"")+"</div>";
+  if (f.url) return "<a class='ct-card' href='"+esc(f.url)+"' target='_blank' rel='noopener noreferrer'>"+inner+"</a>";
+  return "<div class='ct-card'>"+inner+"</div>";
+}
+function renderFestivals(){
+  /* 데이터: 구글시트 '영화제' 탭 (매일 아침 7시 서버가 구글검색으로 자동 재조사·갱신) */
+  var list = (state.data && state.data.festivals && state.data.festivals.length) ? state.data.festivals : FESTIVALS;
+  var updated = FESTIVALS_UPDATED;
+  for (var u=0; u<list.length; u++){ if (list[u].updated){ updated = String(list[u].updated).slice(0,10); break; } }
+  var html = pageHead("festivals",
+    "전 세계 AI 영화제·AI 영화 공모 모음 — 매일 아침 7시 자동 재조사 (마지막 갱신 "+esc(updated)+")", "");
+  var today = new Date(); today.setHours(0,0,0,0);
+  var isD = function(s){ return /^\d{4}-\d{2}-\d{2}$/.test(String(s||"")); };
+  var open = [], closed = [], tbd = [];
+  list.forEach(function(f){
+    if (isD(f.deadline)){
+      var d = parseDate(f.deadline);
+      (d && d >= today ? open : closed).push(f);
+    } else tbd.push(f);
+  });
+  open.sort(function(a,b){ return String(a.deadline).localeCompare(String(b.deadline)); });
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>접수 중</div>"+
+    "<h3>출품 가능</h3></div><div class='sec-note'>"+open.length+"건 · 마감 임박순</div></div><div class='ct-list'>";
+  if (!open.length) html += "<div class='empty'>현재 접수 중인 영화제가 없습니다.</div>";
+  else open.forEach(function(f){ html += festivalCard(f, today); });
+  html += "</div></section>";
+  if (tbd.length){
+    html += "<section class='panel collapsed' data-foldsec><div class='sec-head fold-head' data-fold>"+
+      "<div><div class='eyebrow'>공고 대기</div><h3>차기 일정 미공고 <span style='font-weight:400;color:var(--ink-3);font-size:12px'>(클릭하여 펼치기)</span></h3></div>"+
+      "<div style='display:flex;align-items:center;gap:10px'><div class='sec-note'>"+tbd.length+"건</div><span class='fold-btn'>▾</span></div></div><div class='ct-list'>";
+    tbd.forEach(function(f){ html += festivalCard(f, today); });
+    html += "</div></section>";
+  }
+  if (closed.length){
+    html += "<section class='panel collapsed' data-foldsec><div class='sec-head fold-head' data-fold>"+
+      "<div><div class='eyebrow'>마감</div><h3>접수 마감·지난 회차 <span style='font-weight:400;color:var(--ink-3);font-size:12px'>(클릭하여 펼치기)</span></h3></div>"+
+      "<div style='display:flex;align-items:center;gap:10px'><div class='sec-note'>"+closed.length+"건</div><span class='fold-btn'>▾</span></div></div><div class='ct-list'>";
+    closed.sort(function(a,b){ return String(b.deadline).localeCompare(String(a.deadline)); });
+    closed.forEach(function(f){ html += festivalCard(f, today); });
+    html += "</div></section>";
+  }
+  C.innerHTML = html;
+  bindFold(C);
+}
+
 /* ---- AI 공모전 ---- */
 var CONTEST_URLS = {
   domestic: "https://junyeo217.github.io/ai-contest-board/data/contests.json",
@@ -2460,7 +2544,7 @@ var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
   memos:renderMemos, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
-  newsrep:renderReports, youtube:renderYoutube, contests:renderContests, gov:renderGov
+  newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov
 };
 function render(){
   var route = curRoute();
