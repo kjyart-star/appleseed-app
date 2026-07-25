@@ -973,7 +973,7 @@ var MENU = [
   { cap:"현황", items:[ ["dashboard","📊","대시보드",0] ] },
   { cap:"업무", items:[ ["todos","✅","할일관리",0], ["calendar","📅","일정관리",0], ["meetings","🎙️","전사록",0], ["memos","📝","메모관리",0] ] },
   { cap:"영업", items:[ ["clients","🤝","고객관리",0], ["projects","🎬","프로젝트관리",0] ] },
-  { cap:"재무", items:[ ["revenue","💰","매출관리",0], ["deposits","🏦","입금관리",0], ["expenses","🧾","지출관리",0], ["profit","📈","영업이익분석",0],
+  { cap:"재무", items:[ ["revenue","💰","매출관리",0], ["deposits","🏦","입금관리",0], ["expenses","🧾","지출관리",0], ["profit","📈","영업이익분석",0], ["subs","🔁","AI 구독관리",0],
       ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",1] ] },
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
   { cap:"커뮤니케이션", items:[ ["mail","✉️","메일관리",1], ["namecard","🪪","명함관리",1], ["newsletter","📰","뉴스레터",1] ] },
@@ -1023,7 +1023,10 @@ var FIELDS = {
   calendar: [ ["event_date","날짜","date"], ["start_time","시작 시간","time"], ["end_time","종료 시간","time"], ["title","제목","text"], ["all_day","종일","checkbox"] ],
   meetings: [ ["meeting_date","회의일","date"], ["title","제목","text"], ["summary","요약","textarea"] ],
   clients: [ ["name","이름/회사","text"], ["contact_person","담당자","text"], ["phone","전화","text"], ["email","이메일","text"], ["memo","메모","textarea"] ],
-  memos: [ ["title","제목","text"], ["content","내용","textarea"] ]
+  memos: [ ["title","제목","text"], ["content","내용","textarea"] ],
+  subs: [ ["name","서비스명","text"], ["plan","플랜","text"], ["amount","금액","number"],
+    ["currency","통화","select",["원","달러"]], ["cycle","결제주기","select",["월간","연간"]],
+    ["renew_date","다음 갱신일","date"], ["memo","메모","text"] ]
 };
 var NUMS = { amount:1, contract_amount:1, progress:1 };
 var BOOLS = { done:1, all_day:1 };
@@ -1096,7 +1099,7 @@ function openForm(table, row, defaults){
     else await crud("POST", table, null, obj);
   };
 }
-function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos"}; return m[t]||t; }
+function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs"}; return m[t]||t; }
 
 async function delRow(table, id){
   var ok = await confirmDlg("정말 삭제할까요? 되돌릴 수 없습니다.", "삭제", "삭제 확인");
@@ -1561,6 +1564,77 @@ function renderMemos(){
   C.innerHTML = html;
   C.querySelector("[data-add]").onclick = function(){ openForm("memos", null); };
   bindRowActions(C, "memos", d.memos);
+}
+
+/* ---- AI 구독관리 (서비스 등록·갱신일 체크·월 비용 합산) ---- */
+function subNextRenewal(dateStr, cycle, today){
+  var d = parseDate(dateStr); if(!d) return null;
+  var guard = 0;
+  while (d < today && guard++ < 600){
+    d = (cycle === "연간")
+      ? new Date(d.getFullYear()+1, d.getMonth(), d.getDate())
+      : new Date(d.getFullYear(), d.getMonth()+1, d.getDate());
+  }
+  return d;
+}
+function subFmtDate(d){
+  return d ? d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0") : "미정";
+}
+function subMoney(amount, currency){
+  var n = Number(amount)||0;
+  return currency === "달러"
+    ? "<span class='money'>$"+(n % 1 ? n.toFixed(2) : comma(n))+"</span>"
+    : moneyWon(n);
+}
+function renderSubs(){
+  var d = state.data, list = (d.subs||[]).slice();
+  var today = new Date(); today.setHours(0,0,0,0);
+  /* 월 환산: 월간=금액 그대로, 연간=금액/12 */
+  var mKrw = 0, mUsd = 0, weekCnt = 0;
+  var rows = list.map(function(s){
+    var monthly = (Number(s.amount)||0) / (s.cycle === "연간" ? 12 : 1);
+    if (s.currency === "달러") mUsd += monthly; else mKrw += monthly;
+    var next = subNextRenewal(s.renew_date, s.cycle, today);
+    var days = next ? Math.round((next - today) / 86400000) : null;
+    if (days != null && days <= 7) weekCnt++;
+    return { s: s, next: next, days: days, monthly: monthly };
+  }).sort(function(a,b){
+    if (a.next && b.next) return a.next - b.next;
+    return a.next ? -1 : (b.next ? 1 : 0);
+  });
+  var summary =
+    "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>이번 달 구독 비용 (월 환산)</div>"+
+    "<h3>"+moneyWon(Math.round(mKrw))+(mUsd ? " <span style='font-weight:400;color:var(--ink-3)'>+</span> <span class='money'>$"+(mUsd % 1 ? mUsd.toFixed(2) : comma(mUsd))+"</span>" : "")+"</h3>"+
+    "<div class='sec-note' style='margin-top:4px'>연간 결제는 12개월로 나눠 환산한 금액입니다.</div></div>"+
+    "<div class='sec-note' style='text-align:right'>구독 "+list.length+"개"+(weekCnt ? " · <b style='color:var(--urgent)'>7일 내 갱신 "+weekCnt+"건</b>" : "")+"</div></div></section>";
+  var html = pageHead("subs",
+    "사용 중인 AI 서비스 구독을 등록하면 갱신일 D-day와 월 비용을 자동으로 계산합니다.",
+    "<button class='btn primary' data-add>+ 구독 추가</button>");
+  html += summary;
+  html += "<section class='panel'><div class='tbl-scroll'>";
+  if (!rows.length){
+    html += "<div class='empty'>등록된 구독이 없습니다. ‘+ 구독 추가’로 ChatGPT·Claude·Midjourney 같은 서비스를 등록해보세요.</div>";
+  } else {
+    html += "<table><thead><tr><th>서비스</th><th>플랜</th><th class='r'>금액</th><th>주기</th><th>다음 갱신</th><th class='r'>월 환산</th><th class='r'>관리</th></tr></thead><tbody>";
+    rows.forEach(function(r){
+      var s = r.s;
+      var di = r.next ? ddayInfo(subFmtDate(r.next), today, false) : { cls:"far", txt:"—" };
+      html += "<tr><td style='font-weight:700'>"+esc(s.name||"")+"</td>"+
+        "<td style='color:var(--ink-2)'>"+esc(s.plan||"")+"</td>"+
+        "<td class='r tnum'>"+subMoney(s.amount, s.currency)+"</td>"+
+        "<td>"+esc(s.cycle||"월간")+"</td>"+
+        "<td class='tnum'>"+(r.next ? esc(subFmtDate(r.next))+" <span class='dday "+di.cls+" tnum' style='display:inline-block;margin-left:6px'>"+di.txt+"</span>" : "<span style='color:var(--ink-3)'>미정</span>")+"</td>"+
+        "<td class='r tnum'>"+subMoney(Math.round(r.monthly * 100) / 100, s.currency)+"</td>"+
+        "<td class='r'><div class='row-actions'><button class='icon-btn' data-edit='"+s.id+"'>✎</button><button class='icon-btn del' data-del='"+s.id+"'>🗑</button></div></td></tr>";
+    });
+    html += "</tbody></table>";
+  }
+  html += "</div></section>";
+  C.innerHTML = html;
+  C.querySelector("[data-add]").onclick = function(){
+    openForm("subs", null, { currency:"원", cycle:"월간" });
+  };
+  bindRowActions(C, "subs", d.subs);
 }
 
 /* ---- 고객관리 ---- */
@@ -2573,7 +2647,8 @@ var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
   memos:renderMemos, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
-  newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov
+  newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov,
+  subs:renderSubs
 };
 function render(){
   var route = curRoute();
