@@ -2223,11 +2223,117 @@ function bindFold(root){
 }
 
 /* ============ 라우팅 ============ */
+/* ---- AI 지원사업 (K-Startup 공공데이터 — 자체 백엔드 프록시) ---- */
+var GOV_TTL = 10*60*1000, govCache = null;
+var govAiOnly = true, govCls = "전체", govSearch = "";
+var GOV_AI_RE = /AI|인공지능|생성형|딥테크|디지털|데이터/i;
+function fetchGov(force){
+  if (!force && govCache && (Date.now()-govCache.t) < GOV_TTL) return Promise.resolve(govCache.data);
+  var u = GAS_URL + "?action=gov&key=" + encodeURIComponent(KEY) + (force?"&reload=1":"") + "&t=" + Date.now();
+  return fetch(u, { cache:"no-store" }).then(function(r){ return r.json(); })
+    .then(function(j){ govCache = { t:Date.now(), data:j }; return j; });
+}
+function renderGov(){
+  var now = seoulNow(), today = new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  var html = pageHead("gov", "데이터: <b>K-Startup 창업지원 공고</b>(공공데이터포털) · <span data-gov-gen>불러오는 중…</span>",
+    "<button class='btn sm' data-gov-refresh>↻ 갱신</button>");
+  html += "<div class='ct-controls'><input class='proj-search' type='text' placeholder='공고명·기관 검색' data-gov-search>"+
+    "<div class='ct-cats' data-gov-chips></div></div>";
+  html += "<div data-gov-body><div class='empty'>지원사업 공고를 불러오는 중…</div></div>";
+  C.innerHTML = html;
+  var bodyEl = C.querySelector("[data-gov-body]");
+  var chipsEl = C.querySelector("[data-gov-chips]");
+  var genEl = C.querySelector("[data-gov-gen]");
+  var searchEl = C.querySelector("[data-gov-search]");
+  searchEl.value = govSearch;
+  var cur = null;
+
+  function clsList(){
+    var set = {}, order = [];
+    ((cur && cur.items) || []).forEach(function(it){
+      var c = String(it.cls||"").trim();
+      if (c && !set[c]){ set[c]=1; order.push(c); }
+    });
+    return order;
+  }
+  function drawChips(){
+    var h = "<button class='proj-chip"+(govAiOnly?" on":"")+"' data-gov-ai>🤖 AI 관련만</button>";
+    var chips = ["전체"].concat(clsList());
+    if (govCls!=="전체" && chips.indexOf(govCls)<0) govCls = "전체";
+    h += chips.map(function(c){
+      return "<button class='proj-chip"+(c===govCls?" on":"")+"' data-gov-cls='"+esc(c)+"'>"+esc(c)+"</button>";
+    }).join("");
+    chipsEl.innerHTML = h;
+    chipsEl.querySelector("[data-gov-ai]").onclick = function(){ govAiOnly = !govAiOnly; drawChips(); drawBody(); };
+    chipsEl.querySelectorAll("[data-gov-cls]").forEach(function(b){
+      b.onclick = function(){ govCls = b.getAttribute("data-gov-cls"); drawChips(); drawBody(); };
+    });
+  }
+  function match(it){
+    if (govAiOnly && !GOV_AI_RE.test((it.nm||"")+" "+(it.trgt||"")+" "+(it.cls||""))) return false;
+    if (govCls!=="전체" && String(it.cls||"")!==govCls) return false;
+    var q = String(govSearch||"").trim().toLowerCase();
+    if (!q) return true;
+    return String(it.nm||"").toLowerCase().indexOf(q)>=0 ||
+           String(it.org||"").toLowerCase().indexOf(q)>=0 ||
+           String(it.inst||"").toLowerCase().indexOf(q)>=0;
+  }
+  function govCard(it){
+    var di = ddayInfo(it.end, today, false);
+    var url = ctSafeUrl(it.url);
+    var titleBits = "<span>"+esc(it.nm||"(공고명 없음)")+"</span>";
+    if (it.cls) titleBits += "<span class='ct-tag'>"+esc(it.cls)+"</span>";
+    if (it.regin) titleBits += "<span class='ct-country'>"+esc(it.regin)+"</span>";
+    var metaBits = [];
+    var orgTxt = [it.org, it.inst].filter(function(x){return x;}).filter(function(x,i,a){return a.indexOf(x)===i;}).join(" · ");
+    if (orgTxt) metaBits.push("<b>"+esc(orgTxt)+"</b>");
+    metaBits.push("접수 "+esc(it.bgng||"미정")+" ~ "+esc(it.end||"미정"));
+    var inner =
+      "<div class='dday "+di.cls+" tnum'>"+di.txt+"</div>"+
+      "<div class='ct-main'><div class='ct-title'>"+titleBits+"</div>"+
+      "<div class='ct-meta'>"+metaBits.join("<span>·</span>")+"</div>"+
+      (it.trgt?"<div class='ct-sum'>대상: "+esc(String(it.trgt).slice(0,120))+"</div>":"")+"</div>";
+    if (url) return "<a class='ct-card' href='"+esc(url)+"' target='_blank' rel='noopener noreferrer'>"+inner+"</a>";
+    return "<div class='ct-card'>"+inner+"</div>";
+  }
+  function drawBody(){
+    if (!cur || !cur.ok){ return; }
+    var list = (cur.items||[]).filter(match);
+    var h = "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>모집 중</div>"+
+      "<h3>"+(govAiOnly?"AI 관련 지원사업":"전체 지원사업")+"</h3></div><div class='sec-note'>"+list.length+"건 · 마감 임박순</div></div><div class='ct-list'>";
+    if (!list.length) h += "<div class='empty'>조건에 맞는 공고가 없습니다. ('AI 관련만'을 끄면 전체 공고가 보입니다)</div>";
+    else list.forEach(function(it){ h += govCard(it); });
+    h += "</div></section>";
+    bodyEl.innerHTML = h;
+  }
+  function load(force){
+    bodyEl.innerHTML = "<div class='empty'>지원사업 공고를 불러오는 중…</div>";
+    fetchGov(force).then(function(j){
+      cur = j;
+      if (!j || !j.ok){
+        var msg = (j && j.error === "unknown action")
+          ? "백엔드 업데이트(설치) 후 사용 가능합니다 — Claude에게 문의하세요."
+          : "공고를 불러오지 못했습니다" + (j && j.error ? " ("+esc(j.error)+")" : "") + ".";
+        genEl.textContent = "";
+        bodyEl.innerHTML = "<div class='empty'>"+msg+"<br><a href='https://www.k-startup.go.kr' target='_blank' rel='noopener' style='color:var(--accent-ink)'>K-Startup 바로가기 ↗</a></div>";
+        return;
+      }
+      genEl.textContent = "업데이트 " + esc(j.generated||"") + " · 총 " + (j.total||0) + "건";
+      drawChips(); drawBody();
+    }).catch(function(e){
+      bodyEl.innerHTML = "<div class='empty'>공고를 불러오지 못했습니다 ("+esc(String(e.message||e))+")</div>";
+    });
+  }
+  C.querySelector("[data-gov-refresh]").onclick = function(){ load(true); };
+  searchEl.oninput = function(){ govSearch = searchEl.value; drawBody(); };
+  load(false);
+}
+
 var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
   memos:renderMemos, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
-  contests:renderContests
+  contests:renderContests, gov:renderGov
 };
 function render(){
   var route = curRoute();
