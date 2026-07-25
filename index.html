@@ -817,14 +817,37 @@ var DOW = ["일","월","화","수","목","금","토"];
 
 /* ============ API ============ */
 var GAS_URL = "https://script.google.com/macros/s/AKfycbxnvU9mKh-0QseuyPhOeXJWMfT3u88LWKaMEJLEY2E77RKq4vzpqUmsuq3OLJyWjTCT/exec";
+/* 변이(추가·수정·삭제)와 조회의 경합 방지:
+   - lastMutationAt: 변이가 시작·완료된 시각. 그 이전에 시작된 조회 응답은 낡은 데이터이므로 폐기.
+   - tombstones: 최근 삭제한 행 id. 서버 반영 지연 중 조회가 가져와도 화면에 되살리지 않음. */
+var lastMutationAt = 0;
+var tombstones = {};   /* { table: { id: 만료시각(ms) } } */
+function addTombstone(table, id){
+  if (!tombstones[table]) tombstones[table] = {};
+  tombstones[table][String(id)] = Date.now() + 30000;   /* 30초면 서버 반영 충분 */
+}
+function applyTombstones(d){
+  var now = Date.now();
+  for (var t in tombstones){
+    var m = tombstones[t];
+    for (var id in m){ if (m[id] < now) delete m[id]; }
+    if (d && d[t] && d[t].length && Object.keys(m).length){
+      d[t] = d[t].filter(function(r){ return !m[String(r.id)]; });
+    }
+  }
+  return d;
+}
 async function loadData(){
   if (window.__MOCK__){ state.data = window.__MOCK__; state.loading=false; return; }
+  var startedAt = Date.now();
   /* &t= 캐시버스터: 쓰기 직후 재조회가 브라우저/중간 캐시에 걸리지 않게 */
   var r = await fetch(GAS_URL + "?action=data&key=" + encodeURIComponent(KEY) + "&t=" + Date.now(), { cache: "no-store" });
   if (!r.ok){ throw new Error("HTTP "+r.status); }
   var j = await r.json();
   if (j && j.error) throw new Error(j.error);
-  state.data = j;
+  /* 이 조회가 시작된 뒤에 변이가 있었다면(또는 변이 진행 중) 낡은 스냅샷이므로 버림 */
+  if (startedAt < lastMutationAt){ state.loading = false; return; }
+  state.data = applyTombstones(j);
   state.loading = false;
 }
 async function apiSend(method, table, id, body){
@@ -845,6 +868,7 @@ async function crud(method, table, id, body){
     id = realId;
   }
   /* 진짜 낙관적 반영: 서버 응답을 기다리지 않고 화면부터 즉시 갱신 (실패 시 원복) */
+  lastMutationAt = Date.now();   /* 이 시각 이전에 시작된 조회 응답은 폐기됨 */
   var list = state.data && state.data[table];
   var backup = list ? list.slice() : null;
   var tempId = null, resolvePending = null;
@@ -860,6 +884,7 @@ async function crud(method, table, id, body){
         if (String(list[i0].id) === String(id)){ if (body) for (var k1 in body) list[i0][k1] = body[k1]; break; }
       }
     } else if (method === "DELETE"){
+      addTombstone(table, id);   /* 진행 중이던 조회가 이 행을 되살리지 못하게 */
       state.data[table] = list.filter(function(r){ return String(r.id) !== String(id); });
     }
     render();
@@ -867,11 +892,15 @@ async function crud(method, table, id, body){
   try{
     var res = await apiSend(method, table, id, body);
     /* 서버 확정값으로 교체 (임시 id → 실제 id) */
+    lastMutationAt = Date.now();   /* 변이 완료 시각 — 이 사이 시작된 조회 응답도 폐기 */
     try{
       var cur = state.data && state.data[table];
       if (cur && res && res.row){
         if (method === "POST"){
-          for (var i=0;i<cur.length;i++){ if (String(cur[i].id) === String(tempId)){ cur[i] = res.row; break; } }
+          var found = false;
+          for (var i=0;i<cur.length;i++){ if (String(cur[i].id) === String(tempId)){ cur[i] = res.row; found = true; break; } }
+          /* 진행 중이던 조회가 임시 행을 덮어썼다면 확정 행을 다시 넣음 */
+          if (!found && !cur.some(function(r){ return String(r.id) === String(res.row.id); })) cur.push(res.row);
         } else if (method === "PATCH"){
           for (var j=0;j<cur.length;j++){ if (String(cur[j].id) === String(id)){ cur[j] = res.row; break; } }
         }
