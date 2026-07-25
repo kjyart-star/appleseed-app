@@ -530,6 +530,18 @@
     border-radius:9px; padding:10px 12px; font-size:13.5px; width:100%; font-family:var(--font);}
   .proj-search:focus{outline:none; border-color:var(--accent);}
   .proj-count{font-size:11.5px; color:var(--ink-3); font-weight:700;}
+  /* 고정경비 매트릭스 표 */
+  .fc-table{font-size:12.5px;}
+  .fc-table th, .fc-table td{padding:8px 9px; white-space:nowrap;}
+  .fc-table td.fc-cat{font-weight:700; position:sticky; left:0; background:var(--surface); z-index:1;}
+  .fc-table th:first-child{position:sticky; left:0; background:var(--surface-2,var(--surface)); z-index:2;}
+  .fc-pay{display:inline-block; margin-left:6px; font-size:10.5px; font-weight:600; color:var(--accent-ink);
+    background:var(--accent-soft,rgba(80,150,120,.14)); border-radius:5px; padding:1px 6px; vertical-align:middle;}
+  .fc-dash{color:var(--ink-4,#667);}
+  .fc-rowtot{font-weight:700;}
+  .fc-table .fc-cur{background:var(--accent-soft,rgba(80,150,120,.12));}
+  .fc-table tfoot .fc-total td{font-weight:800; border-top:2px solid var(--line-strong); background:var(--surface-2,var(--surface));}
+  .fc-table tfoot .fc-total td:first-child{position:sticky; left:0;}
   /* 프로젝트 목록 하단 AI 구독 요약 카드 */
   .proj-subs{padding:0 8px 10px; border-top:1px solid var(--line);}
   .proj-subs-card{display:block; width:100%; text-align:left; margin-top:10px; cursor:pointer;
@@ -1041,9 +1053,15 @@ var FIELDS = {
   memos: [ ["title","제목","text"], ["content","내용","textarea"] ],
   subs: [ ["name","서비스명","text"], ["plan","플랜","text"], ["amount","금액","number"],
     ["currency","통화","select",["원","달러"]], ["cycle","결제주기","select",["월간","연간"]],
-    ["renew_date","다음 갱신일","date"], ["memo","메모","text"] ]
+    ["renew_date","다음 갱신일","date"], ["memo","메모","text"] ],
+  fixedcost: [ ["year","연도","select",["2025","2026","2027"]], ["category","항목","text"], ["payday","결제일(매월 N일, 없으면 0)","number"],
+    ["m1","1월","number"],["m2","2월","number"],["m3","3월","number"],["m4","4월","number"],
+    ["m5","5월","number"],["m6","6월","number"],["m7","7월","number"],["m8","8월","number"],
+    ["m9","9월","number"],["m10","10월","number"],["m11","11월","number"],["m12","12월","number"],
+    ["note","메모","text"] ]
 };
-var NUMS = { amount:1, contract_amount:1, progress:1 };
+var NUMS = { amount:1, contract_amount:1, progress:1, year:1, payday:1,
+  m1:1,m2:1,m3:1,m4:1,m5:1,m6:1,m7:1,m8:1,m9:1,m10:1,m11:1,m12:1 };
 var BOOLS = { done:1, all_day:1 };
 
 function openForm(table, row, defaults){
@@ -1114,7 +1132,7 @@ function openForm(table, row, defaults){
     else await crud("POST", table, null, obj);
   };
 }
-function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs"}; return m[t]||t; }
+function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses"}; return m[t]||t; }
 
 async function delRow(table, id){
   var ok = await confirmDlg("정말 삭제할까요? 되돌릴 수 없습니다.", "삭제", "삭제 확인");
@@ -2186,15 +2204,68 @@ function renderDeposits(){
 }
 
 /* ---- 지출관리 ---- */
+/* 고정경비(공동경비) 월별 매트릭스 — 임대료·정수기·인터넷·전기 등 매월 반복 지출 */
+var fixedYear = null;
+var FC_ORDER = ["임대료","정수기","인터넷","기타","기타 (이사)","전기(지하)","전기(3층)"];
+function fixedCostSection(){
+  var all = (state.data.fixedcost||[]);
+  var years = {};
+  all.forEach(function(r){ if(r.year) years[Number(r.year)]=1; });
+  var now = seoulNow(), curY = now.getFullYear(), curM = now.getMonth()+1;
+  if (!fixedYear) fixedYear = years[curY] ? curY : (Object.keys(years).map(Number).sort().pop() || curY);
+  fixedYear = Number(fixedYear);
+  var yearList = Object.keys(years).map(Number);
+  if (yearList.indexOf(curY)<0) yearList.push(curY);
+  yearList.sort(function(a,b){ return a-b; });
+  var rows = all.filter(function(r){ return Number(r.year)===fixedYear; })
+    .sort(function(a,b){ var ia=FC_ORDER.indexOf(a.category), ib=FC_ORDER.indexOf(b.category); return (ia<0?99:ia)-(ib<0?99:ib); });
+  var MK = ["m1","m2","m3","m4","m5","m6","m7","m8","m9","m10","m11","m12"];
+  var mTot = [0,0,0,0,0,0,0,0,0,0,0,0], grand = 0;
+  rows.forEach(function(r){ MK.forEach(function(mk,i){ var v=Number(r[mk])||0; mTot[i]+=v; grand+=v; }); });
+  var thisMonth = (fixedYear===curY) ? mTot[curM-1] : 0;
+  var yChips = yearList.map(function(y){ return "<button class='proj-chip"+(y===fixedYear?" on":"")+"' data-fy='"+y+"'>"+y+"년</button>"; }).join("");
+  var mh = ""; for (var mi=1; mi<=12; mi++) mh += "<th class='r"+(fixedYear===curY&&mi===curM?" fc-cur":"")+"'>"+mi+"월</th>";
+  var body = "";
+  rows.forEach(function(r){
+    var rt=0, cells="";
+    MK.forEach(function(mk,i){ var v=Number(r[mk])||0; rt+=v; var cur=(fixedYear===curY&&(i+1)===curM);
+      cells += "<td class='r tnum"+(cur?" fc-cur":"")+"'>"+(v?comma(v):"<span class='fc-dash'>–</span>")+"</td>"; });
+    var pay = (Number(r.payday)>0) ? "<span class='fc-pay'>매월 "+r.payday+"일</span>" : "";
+    body += "<tr><td class='fc-cat'>"+esc(r.category||"")+pay+"</td>"+cells+
+      "<td class='r tnum fc-rowtot'>"+comma(rt)+"</td>"+
+      "<td class='r'><div class='row-actions'><button class='icon-btn' data-fc-edit='"+r.id+"'>✎</button><button class='icon-btn del' data-fc-del='"+r.id+"'>🗑</button></div></td></tr>";
+  });
+  var tRow = "<tr class='fc-total'><td>월 합계</td>";
+  mTot.forEach(function(t,i){ var cur=(fixedYear===curY&&(i+1)===curM); tRow += "<td class='r tnum"+(cur?" fc-cur":"")+"'>"+(t?comma(t):"–")+"</td>"; });
+  tRow += "<td class='r tnum'>"+comma(grand)+"</td><td></td></tr>";
+  var h = "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>고정경비 · 공동경비</div><h3>월별 고정비 ("+fixedYear+"년)</h3></div>"+
+    "<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>"+
+      (fixedYear===curY?"<div class='sum-chip'>이번 달("+curM+"월)<b class='tnum'>"+moneyMan(thisMonth)+"</b></div>":"")+
+      "<div class='sum-chip'>연간 합계<b class='tnum'>"+moneyMan(grand)+"</b></div>"+
+      "<button class='btn sm' data-fc-add>+ 항목</button></div></div>"+
+    "<div class='proj-chips' style='margin-bottom:10px'>"+yChips+"</div><div class='tbl-scroll'>";
+  if (!rows.length) h += "<div class='empty'>"+fixedYear+"년 고정경비 항목이 없습니다. ‘+ 항목’으로 추가하세요.</div>";
+  else h += "<table class='fc-table'><thead><tr><th>항목</th>"+mh+"<th class='r'>연간</th><th class='r'>관리</th></tr></thead><tbody>"+body+"</tbody><tfoot>"+tRow+"</tfoot></table>";
+  h += "</div></section>";
+  return h;
+}
+function bindFixedCost(){
+  C.querySelectorAll("[data-fy]").forEach(function(b){ b.onclick=function(){ fixedYear=Number(b.getAttribute("data-fy")); renderExpenses(); }; });
+  var add = C.querySelector("[data-fc-add]"); if(add) add.onclick=function(){ openForm("fixedcost", null, { year:String(fixedYear), payday:0 }); };
+  C.querySelectorAll("[data-fc-edit]").forEach(function(b){ b.onclick=function(){ openForm("fixedcost", findById(state.data.fixedcost, b.getAttribute("data-fc-edit"))); }; });
+  C.querySelectorAll("[data-fc-del]").forEach(function(b){ b.onclick=function(){ delRow("fixedcost", b.getAttribute("data-fc-del")); }; });
+}
 function renderExpenses(){
   var d = state.data, list = (d.expense||[]).slice().sort(function(a,b){ return String(b.date||"").localeCompare(String(a.date||"")); });
   var sum = list.reduce(function(a,x){return a+(Number(x.amount)||0);},0);
   var byCat = {};
   list.forEach(function(x){ var c=x.category||"기타"; byCat[c]=(byCat[c]||0)+(Number(x.amount)||0); });
   var html = pageHead("expenses","", "<button class='btn primary' data-add>+ 지출 추가</button>");
+  html += fixedCostSection();
   var chips = "<div class='sum-chip'>전체 지출<b class='tnum'>"+moneyMan(sum)+"</b></div>";
   Object.keys(byCat).sort(function(a,b){return byCat[b]-byCat[a];}).forEach(function(c){ chips += "<div class='sum-chip'>"+esc(c)+"<b class='tnum'>"+moneyMan(byCat[c])+"</b></div>"; });
-  html += "<section class='panel'><div class='sum-strip'>"+chips+"</div><div class='tbl-scroll'>";
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>개별 지출</div><h3>단건 지출 내역</h3></div></div><div class='sum-strip'>"+chips+"</div><div class='tbl-scroll'>";
   if (!list.length) html += "<div class='empty'>지출 내역이 없습니다.</div>";
   else { html += "<table><thead><tr><th>날짜</th><th>거래처</th><th>항목</th><th>분류</th><th class='r'>금액</th><th class='r'>관리</th></tr></thead><tbody>";
     list.forEach(function(x){ html += "<tr><td class='tnum'>"+esc(String(x.date||"").slice(0,10))+"</td><td>"+esc(x.vendor||"")+"</td><td>"+esc(x.item||"")+"</td><td><span class='mini-tag vfx'>"+esc(x.category||"기타")+"</span></td><td class='r tnum'>"+moneyWon(x.amount)+"</td>"+
@@ -2203,7 +2274,9 @@ function renderExpenses(){
   html += "</div></section>";
   C.innerHTML = html;
   C.querySelector("[data-add]").onclick = function(){ openForm("expense", null); };
+  bindFixedCost();
   bindRowActions(C, "expense", d.expense);
+  applyMask();
 }
 
 /* ---- 영업이익분석 ---- */
