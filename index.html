@@ -900,7 +900,7 @@ var MENU = [
       ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",1] ] },
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
   { cap:"커뮤니케이션", items:[ ["mail","✉️","메일관리",1], ["namecard","🪪","명함관리",1], ["newsletter","📰","뉴스레터",1] ] },
-  { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["gov","🏛️","AI 지원사업",0], ["newsrep","📰","뉴스리포트",0], ["library","📚","자료실",1], ["reports","📑","리포트",0] ] },
+  { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["gov","🏛️","AI 지원사업",0], ["newsrep","📰","뉴스리포트",0], ["youtube","▶️","AI 유튜브",0], ["library","📚","자료실",1], ["reports","📑","리포트",0] ] },
   { cap:"시스템", items:[ ["cert","🏷️","재직증명서",1] ] }
 ];
 var TITLES = {};
@@ -2005,7 +2005,7 @@ function renderReports(){
   /* 같은 렌더러를 두 메뉴가 공유: reports=재무·업무 리포트 / newsrep=뉴스리포트(브리핑) */
   var mode = curRoute()==="newsrep" ? "news" : "biz";
   var noteDesc = mode==="news"
-    ? "AI 업계 브리핑 — 매일 아침 7시 자동 발행됩니다 (뉴스·유튜브·정부지원사업)."
+    ? "AI 업계 브리핑 — 매일 아침 7시 자동 발행됩니다 (뉴스·정부지원사업 · 유튜브는 'AI 유튜브' 메뉴)."
     : "리포트는 Claude에게 '/재무점검' 또는 '/리포트'로 요청하면 자동 생성됩니다.";
   var html = pageHead(curRoute(), noteDesc, "");
   /* 백엔드 v4 미배포: reports 키 자체가 없으면 안내만 표시(에러 없음) */
@@ -2057,7 +2057,7 @@ function renderReports(){
       "<div class='rep-d-meta'><span class='rtype-badge "+rtypeCls(r.rtype)+"'>"+esc(r.rtype||"수시")+"</span>"+
       "<span class='tnum'>"+esc(String(r.report_date||"").slice(0,10))+"</span></div></div>"+
       "<button class='btn sm ghost danger' data-rep-del='"+esc(r.id)+"'>삭제</button></div>"+
-      "<div class='rep-content'>"+richReport(r.content||"")+"</div>";
+      "<div class='rep-content'>"+richReport(mode==="news" ? stripYtSection(r.content||"") : (r.content||""))+"</div>";
     var db = detailEl.querySelector("[data-rep-del]");
     if (db) db.onclick = function(){ delRow("reports", r.id); };
   }
@@ -2067,6 +2067,50 @@ function renderReports(){
       drawList(); drawDetail(); };
   });
   drawList(); drawDetail();
+}
+
+/* ---- AI 유튜브 (브리핑의 [유튜브 최신 영상] 섹션만 날짜별 모음) ---- */
+var YT_MARK = "[유튜브 최신 영상]";
+function ytSectionOf(content){
+  var c = String(content||"");
+  var i = c.indexOf(YT_MARK);
+  if (i < 0) return "";
+  var rest = c.slice(i + YT_MARK.length);
+  var nx = rest.search(/\n\[[^\[\]\n]+\]/);   /* 다음 섹션 헤더 직전까지 */
+  return (nx > -1 ? rest.slice(0, nx) : rest).trim();
+}
+function stripYtSection(content){
+  var c = String(content||"");
+  var i = c.indexOf(YT_MARK);
+  if (i < 0) return c;
+  var rest = c.slice(i + YT_MARK.length);
+  var nx = rest.search(/\n\[[^\[\]\n]+\]/);
+  return (c.slice(0, i) + (nx > -1 ? rest.slice(nx) : "")).replace(/\n{3,}/g, "\n\n").trim();
+}
+function renderYoutube(){
+  var d = state.data;
+  var noteDesc = "매일 아침 브리핑에서 수집한 AI 관련 유튜브 영상 모음입니다 (생성형 AI · 바이브코딩 · AI 영상 제작).";
+  var html = pageHead("youtube", noteDesc, "");
+  var briefs = (d.reports||[]).slice()
+    .filter(function(r){ return String(r.rtype||"")==="브리핑" && ytSectionOf(r.content); })
+    .sort(function(a,b){ return String(b.report_date||"").localeCompare(String(a.report_date||"")); })
+    .slice(0, 30);
+  if (!briefs.length){
+    html += "<section class='panel' style='background:transparent;border:0;box-shadow:none'><div class='placeholder'><div class='ico'>▶️</div><h3>아직 수집된 유튜브 영상이 없습니다</h3><p>매일 아침 7시 브리핑 발행 시 자동으로 쌓입니다.</p></div></section>";
+    C.innerHTML = html; return;
+  }
+  briefs.forEach(function(r, bi){
+    var sec = ytSectionOf(r.content);
+    var cnt = (sec.match(/^•/gm)||[]).length;
+    html += "<section class='panel"+(bi>0?" collapsed":"")+"'"+(bi>0?" data-foldsec":"")+">"+
+      "<div class='sec-head"+(bi>0?" fold-head' data-fold":"'")+"><div><div class='eyebrow'>AI 유튜브</div>"+
+      "<h3 class='tnum'>"+esc(String(r.report_date||"").slice(0,10))+"</h3></div>"+
+      "<div style='display:flex;align-items:center;gap:10px'><div class='sec-note'>"+cnt+"편</div>"+
+      (bi>0?"<span class='fold-btn'>▾</span>":"")+"</div></div>"+
+      "<div class='rep-content' style='padding:8px 14px 14px'>"+richReport(sec)+"</div></section>";
+  });
+  C.innerHTML = html;
+  bindFold(C);
 }
 
 /* ---- AI 공모전 ---- */
@@ -2362,7 +2406,7 @@ var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
   memos:renderMemos, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
-  newsrep:renderReports, contests:renderContests, gov:renderGov
+  newsrep:renderReports, youtube:renderYoutube, contests:renderContests, gov:renderGov
 };
 function render(){
   var route = curRoute();
