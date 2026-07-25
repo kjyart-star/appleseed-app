@@ -1586,6 +1586,30 @@ function subMoney(amount, currency){
     ? "<span class='money'>$"+(n % 1 ? n.toFixed(2) : comma(n))+"</span>"
     : moneyWon(n);
 }
+/* 환율 (USD→KRW): 무료 API에서 하루 2회 갱신, 실패 시 직전 값/기본값 사용 */
+var FX_FALLBACK = 1400, fxFetching = false;
+function fxRate(){
+  try{
+    var c = JSON.parse(localStorage.getItem("appleseed_fx")||"null");
+    if (c && c.v > 500 && c.v < 3000) return c.v;
+  }catch(e){}
+  return FX_FALLBACK;
+}
+function fxRefresh(){
+  try{
+    var c = JSON.parse(localStorage.getItem("appleseed_fx")||"null");
+    if (c && Date.now()-c.t < 43200000) return;   /* 12시간 이내면 재사용 */
+  }catch(e){}
+  if (fxFetching) return;
+  fxFetching = true;
+  fetch("https://open.er-api.com/v6/latest/USD").then(function(r){ return r.json(); }).then(function(j){
+    var v = j && j.rates && Number(j.rates.KRW);
+    if (v > 500 && v < 3000){
+      localStorage.setItem("appleseed_fx", JSON.stringify({ t: Date.now(), v: v }));
+      if (curRoute() === "subs") renderSubs();   /* 환율 도착 시 화면 갱신 */
+    }
+  }).catch(function(){}).finally(function(){ fxFetching = false; });
+}
 function renderSubs(){
   var d = state.data, list = (d.subs||[]).slice();
   var today = new Date(); today.setHours(0,0,0,0);
@@ -1602,10 +1626,15 @@ function renderSubs(){
     if (a.next && b.next) return a.next - b.next;
     return a.next ? -1 : (b.next ? 1 : 0);
   });
+  fxRefresh();
+  var rate = fxRate();
+  var totalKrw = Math.round(mKrw + mUsd * rate);
   var summary =
-    "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>이번 달 구독 비용 (월 환산)</div>"+
-    "<h3>"+moneyWon(Math.round(mKrw))+(mUsd ? " <span style='font-weight:400;color:var(--ink-3)'>+</span> <span class='money'>$"+(mUsd % 1 ? mUsd.toFixed(2) : comma(mUsd))+"</span>" : "")+"</h3>"+
-    "<div class='sec-note' style='margin-top:4px'>연간 결제는 12개월로 나눠 환산한 금액입니다.</div></div>"+
+    "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>이번 달 구독 비용 (월 환산 · 원화 합산)</div>"+
+    "<h3>"+moneyWon(totalKrw)+"</h3>"+
+    "<div class='sec-note' style='margin-top:4px'>"+
+      comma(Math.round(mKrw))+"원"+(mUsd ? " + $"+(mUsd % 1 ? mUsd.toFixed(2) : comma(mUsd))+" (환율 1$ ≈ "+comma(Math.round(rate))+"원)" : "")+
+      " · 연간 결제는 12개월로 나눠 환산</div></div>"+
     "<div class='sec-note' style='text-align:right'>구독 "+list.length+"개"+(weekCnt ? " · <b style='color:var(--urgent)'>7일 내 갱신 "+weekCnt+"건</b>" : "")+"</div></div></section>";
   var html = pageHead("subs",
     "사용 중인 AI 서비스 구독을 등록하면 갱신일 D-day와 월 비용을 자동으로 계산합니다.",
@@ -1621,10 +1650,12 @@ function renderSubs(){
       var di = r.next ? ddayInfo(subFmtDate(r.next), today, false) : { cls:"far", txt:"—" };
       html += "<tr><td style='font-weight:700'>"+esc(s.name||"")+"</td>"+
         "<td style='color:var(--ink-2)'>"+esc(s.plan||"")+"</td>"+
-        "<td class='r tnum'>"+subMoney(s.amount, s.currency)+"</td>"+
+        "<td class='r tnum'>"+subMoney(s.amount, s.currency)+
+          (s.currency==="달러" ? "<div style='font-size:11px;color:var(--ink-3)'>≈ "+comma(Math.round((Number(s.amount)||0)*rate))+"원</div>" : "")+"</td>"+
         "<td>"+esc(s.cycle||"월간")+"</td>"+
         "<td class='tnum'>"+(r.next ? esc(subFmtDate(r.next))+" <span class='dday "+di.cls+" tnum' style='display:inline-block;margin-left:6px'>"+di.txt+"</span>" : "<span style='color:var(--ink-3)'>미정</span>")+"</td>"+
-        "<td class='r tnum'>"+subMoney(Math.round(r.monthly * 100) / 100, s.currency)+"</td>"+
+        "<td class='r tnum'>"+subMoney(Math.round(r.monthly * 100) / 100, s.currency)+
+          (s.currency==="달러" ? "<div style='font-size:11px;color:var(--ink-3)'>≈ "+comma(Math.round(r.monthly*rate))+"원</div>" : "")+"</td>"+
         "<td class='r'><div class='row-actions'><button class='icon-btn' data-edit='"+s.id+"'>✎</button><button class='icon-btn del' data-del='"+s.id+"'>🗑</button></div></td></tr>";
     });
     html += "</tbody></table>";
