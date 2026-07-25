@@ -2013,17 +2013,27 @@ function mountProjectWorkspace(container){
     var impending = (d.projects||[]).filter(function(p){ if(p.status!=="진행중") return false; var e=parseDate(p.end_date); if(!e) return false; var diff=Math.round((e-today)/86400000); return diff>=0 && diff<=14; })
       .sort(function(a,b){ return String(a.end_date||"").localeCompare(String(b.end_date||"")); });
     var tax = taxUnissued();
+    /* AI 구독 갱신 임박(10일 이내) */
+    var subsDue = (d.subs||[]).map(function(s){
+      var next = subNextRenewal(s.renew_date, s.cycle, today);
+      var days = next ? Math.round((next-today)/86400000) : null;
+      return { s:s, days:days };
+    }).filter(function(x){ return x.days!=null && x.days>=0 && x.days<=10; })
+      .sort(function(a,b){ return a.days-b.days; });
     var needEl = railEl.querySelector("[data-need]");
     needEl.innerHTML = "<div class='proj-need'>"+
       needRow("deposits","🏦","미수금", arWait.length, moneyMan(arSum))+
       needRow("revenue","🧾","세금계산서 미발행", tax.n, moneyMan(tax.sum))+
       needRow("todos","⏰","지연 할일", lateTodos.length, "")+
-      needRow("impending","📌","마감 임박(14일)", impending.length, "")+"</div>";
+      needRow("impending","📌","마감 임박(14일)", impending.length, "")+
+      needRow("subs","🔁","AI 구독 갱신(10일)", subsDue.length, subsDue.length ? ("D-"+subsDue[0].days) : "")+
+      "</div>";
     needEl.querySelectorAll("[data-need-go]").forEach(function(b){
       b.onclick = function(){ var t=b.getAttribute("data-need-go");
         if (t==="deposits") location.hash="#deposits";
         else if (t==="revenue") location.hash="#revenue";
         else if (t==="todos") location.hash="#todos";
+        else if (t==="subs") location.hash="#subs";
         else if (t==="impending" && impending.length){ projSelId = impending[0].id; localStorage.setItem("appleseed_proj_sel", projSelId); drawList(); drawDetail(); } };
     });
     /* 마감 임박 공모전(7일 이내, 국내+해외) — 동일 fetch 캐시 재사용, 실패 시 줄 생략 */
