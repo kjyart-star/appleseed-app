@@ -2494,6 +2494,29 @@ window.addEventListener("hashchange", render);
   })();
 })();
 
+/* ============ 배포 갱신 자동 감지 ============
+   GitHub Pages 캐시(10분) 때문에 구버전 화면이 보일 수 있음.
+   서버의 Last-Modified 를 확인해 새 배포가 감지되면 캐시를 우회해 자동 새로고침. */
+(function autoUpdate(){
+  if (location.protocol === "file:") return;   /* 로컬 실행본은 해당 없음 */
+  function check(){
+    fetch(location.pathname + "?head=" + Date.now(), { method:"HEAD", cache:"no-store" }).then(function(r){
+      var lm = r.headers.get("last-modified") || "";
+      if (!lm) return;
+      var cur = localStorage.getItem("appleseed_app_lm");
+      if (cur && cur !== lm && sessionStorage.getItem("appleseed_app_rl") !== lm){
+        sessionStorage.setItem("appleseed_app_rl", lm);   /* 재로드 루프 방지 */
+        localStorage.setItem("appleseed_app_lm", lm);
+        location.replace(location.pathname + "?cb=" + Date.now() + location.hash);
+        return;
+      }
+      localStorage.setItem("appleseed_app_lm", lm);
+    }).catch(function(){});
+  }
+  check();
+  setInterval(check, 5 * 60 * 1000);   /* 열어둔 탭도 5분마다 확인 */
+})();
+
 })();
 </script>
 </body>
