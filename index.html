@@ -2235,17 +2235,17 @@ function renderFestivals(){
   if (tbd.length){
     html += "<section class='panel collapsed' data-foldsec><div class='sec-head fold-head' data-fold>"+
       "<div><div class='eyebrow'>공고 대기</div><h3>차기 일정 미공고 <span style='font-weight:400;color:var(--ink-3);font-size:12px'>(클릭하여 펼치기)</span></h3></div>"+
-      "<div style='display:flex;align-items:center;gap:10px'><div class='sec-note'>"+tbd.length+"건</div><span class='fold-btn'>▾</span></div></div><div class='ct-list'>";
+      "<div style='display:flex;align-items:center;gap:10px'><div class='sec-note'>"+tbd.length+"건</div><span class='fold-btn'>▾</span></div></div><div class='fold-body'><div class='ct-list'>";
     tbd.forEach(function(f){ html += festivalCard(f, today); });
-    html += "</div></section>";
+    html += "</div></div></section>";
   }
   if (closed.length){
     html += "<section class='panel collapsed' data-foldsec><div class='sec-head fold-head' data-fold>"+
       "<div><div class='eyebrow'>마감</div><h3>접수 마감·지난 회차 <span style='font-weight:400;color:var(--ink-3);font-size:12px'>(클릭하여 펼치기)</span></h3></div>"+
-      "<div style='display:flex;align-items:center;gap:10px'><div class='sec-note'>"+closed.length+"건</div><span class='fold-btn'>▾</span></div></div><div class='ct-list'>";
+      "<div style='display:flex;align-items:center;gap:10px'><div class='sec-note'>"+closed.length+"건</div><span class='fold-btn'>▾</span></div></div><div class='fold-body'><div class='ct-list'>";
     closed.sort(function(a,b){ return String(b.deadline).localeCompare(String(a.deadline)); });
     closed.forEach(function(f){ html += festivalCard(f, today); });
-    html += "</div></section>";
+    html += "</div></div></section>";
   }
   C.innerHTML = html;
   bindFold(C);
