@@ -438,6 +438,10 @@
   .fld textarea{min-height:88px; resize:vertical;}
   .fld.chk-row{flex-direction:row; align-items:center; gap:8px;}
   .fld.chk-row input{width:auto;}
+  /* 시간 자체 드롭다운 (오전/오후·시·분) */
+  .time-sel{display:flex; align-items:center; gap:6px;}
+  .time-sel select{flex:1; min-width:0;}
+  .ts-colon{color:var(--ink-3); font-weight:700;}
   .modal-f{padding:14px 20px; border-top:1px solid var(--line); display:flex; justify-content:flex-end; gap:8px;}
 
   /* ===== 툴팁 ===== */
@@ -878,7 +882,7 @@ var MENU = [
       ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",1] ] },
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
   { cap:"커뮤니케이션", items:[ ["mail","✉️","메일관리",1], ["namecard","🪪","명함관리",1], ["newsletter","📰","뉴스레터",1] ] },
-  { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["library","📚","자료실",1], ["reports","📑","리포트",0] ] },
+  { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["gov","🏛️","AI 지원사업",0], ["library","📚","자료실",1], ["reports","📑","리포트",0] ] },
   { cap:"시스템", items:[ ["cert","🏷️","재직증명서",1] ] }
 ];
 var TITLES = {};
@@ -942,11 +946,26 @@ function openForm(table, row, defaults){
       body += "<div class='fld'><label>"+esc(label)+"</label><select id='f_"+name+"'>"+o+"</select></div>";
     } else if (type==="textarea"){
       body += "<div class='fld'><label>"+esc(label)+"</label><textarea id='f_"+name+"'>"+esc(val)+"</textarea></div>";
+    } else if (type==="time"){
+      /* 브라우저 기본 시간선택기가 10분 단위(step)를 무시 → 자체 드롭다운 (오전/오후 · 1~12시 · 10분 단위) */
+      var tv = String(val||"").slice(0,5), tap="오전", th="", tmin="";
+      if (/^\d{1,2}:\d{2}$/.test(tv)){
+        var hh24 = parseInt(tv.split(":")[0],10);
+        tap = hh24 >= 12 ? "오후" : "오전";
+        th = String(hh24 % 12 === 0 ? 12 : hh24 % 12);
+        tmin = tv.split(":")[1];
+      }
+      var apO = ["오전","오후"].map(function(x){ return "<option"+(x===tap?" selected":"")+">"+x+"</option>"; }).join("");
+      var hO = "<option value=''>--</option>";
+      for (var hi=1; hi<=12; hi++) hO += "<option"+(String(hi)===th?" selected":"")+">"+hi+"</option>";
+      var tmins = ["00","10","20","30","40","50"];
+      if (tmin && tmins.indexOf(tmin) < 0) tmins.push(tmin); /* 기존 비정형 분(예: 04) 보존 */
+      var mO = tmins.map(function(x){ return "<option"+(x===tmin?" selected":"")+">"+x+"</option>"; }).join("");
+      body += "<div class='fld'><label>"+esc(label)+"</label><div class='time-sel' id='f_"+name+"'>"+
+        "<select data-ap>"+apO+"</select><select data-h>"+hO+"</select><span class='ts-colon'>:</span><select data-m>"+mO+"</select></div></div>";
     } else {
-      var iv = type==="time" ? String(val).slice(0,5) : esc(val);
-      /* 시간 입력은 10분 단위(step=600초) — 분 선택이 00·10·20·30·40·50으로 스크롤됨 */
-      var extra = type==="time" ? " step='600'" : "";
-      body += "<div class='fld'><label>"+esc(label)+"</label><input type='"+type+"'"+extra+" id='f_"+name+"' value='"+iv+"'></div>";
+      var iv = esc(val);
+      body += "<div class='fld'><label>"+esc(label)+"</label><input type='"+type+"' id='f_"+name+"' value='"+iv+"'></div>";
     }
   });
   var bg = el("<div class='modal-bg'><div class='modal'><div class='modal-h'><h3>"+(editing?"수정":"추가")+" · "+esc(TITLES[routeForTable(table)]||table)+"</h3><button class='icon-btn' id='mClose'>✕</button></div><div class='modal-b'>"+body+"</div><div class='modal-f'><button class='btn ghost' id='mCancel'>취소</button><button class='btn primary' id='mSave'>저장</button></div></div></div>");
@@ -963,6 +982,17 @@ function openForm(table, row, defaults){
     fields.forEach(function(f){
       var name=f[0], type=f[2]; var inp = bg.querySelector("#f_"+name);
       if (type==="checkbox") obj[name] = inp.checked;
+      else if (type==="time"){
+        /* 자체 드롭다운 → "HH:mm" 24시간제로 변환 (시 미선택이면 빈 값) */
+        var hv = inp.querySelector("[data-h]").value;
+        if (!hv) obj[name] = "";
+        else {
+          var ap = inp.querySelector("[data-ap]").value;
+          var mv = inp.querySelector("[data-m]").value || "00";
+          var h24 = parseInt(hv,10) % 12; if (ap === "오후") h24 += 12;
+          obj[name] = (h24 < 10 ? "0" : "") + h24 + ":" + mv;
+        }
+      }
       else if (NUMS[name]) obj[name] = inp.value===""? null : Number(inp.value);
       else obj[name] = inp.value;
     });
