@@ -403,6 +403,9 @@
   .rep-content .item-card.yt img{width:200px; aspect-ratio:16/9; object-fit:cover; border:1px solid var(--line);}
   .rep-content .item-card.news img{width:42px; height:42px; padding:6px; background:var(--surface);
     border:1px solid var(--line);}
+  /* 기사 사진이 있는 뉴스 카드 — 유튜브 카드와 동일한 썸네일 크기 */
+  .rep-content .item-card.news.photo img{width:150px; height:auto; aspect-ratio:16/9;
+    object-fit:cover; padding:0; background:var(--surface-2); border:1px solid var(--line);}
   .rep-content .ic-body{display:flex; flex-direction:column; gap:4px; min-width:0;}
   .rep-content .ic-title{font-weight:700; color:var(--ink); font-size:14.5px; line-height:1.45;}
   .rep-content .ic-desc{font-size:13px; color:var(--ink-2); line-height:1.55;}
@@ -785,6 +788,10 @@ function richReport(s){
   }
   for (var i=0;i<lines.length;i++){
     var t = lines[i].trim();
+    /* (img: URL) 마커 = 서버가 붙인 기사 사진 → 사진 카드로 렌더 */
+    var imgM = t.match(/[\(（]\s*img\s*:\s*(https?:\/\/[^\s)）]+)\s*[\)）]/i);
+    var photo = imgM ? imgM[1] : "";
+    if (imgM) t = t.replace(imgM[0], "").trim();
     var um = t.match(/(https?:\/\/[^\s)<>"'　]+)/);
     if (/^[•\-*]/.test(t) && um){
       var url = um[1];
@@ -799,9 +806,12 @@ function richReport(s){
       var hh = url.match(/^https?:\/\/([^\/]+)/); var hst = hh ? hh[1].replace(/^www\./,"") : "";
       var img, cls, go;
       if (ym){ img = "https://i.ytimg.com/vi/"+ym[1]+"/mqdefault.jpg"; cls = "yt"; go = "youtube.com · ▶ 영상 보기"; }
+      else if (photo){ img = photo; cls = "news photo"; go = hst+" · 기사 보기 ↗"; }
       else { img = "https://www.google.com/s2/favicons?domain="+hst+"&sz=128"; cls = "news"; go = hst+" · 기사 보기 ↗"; }
+      /* 사진 로드 실패 시 파비콘으로 대체 (깨진 이미지 방지) */
+      var onerr = photo ? " onerror=\"this.onerror=null;this.src='https://www.google.com/s2/favicons?domain="+esc(hst)+"&sz=128';this.closest('.item-card').classList.remove('photo')\"" : "";
       cardBuf.push("<a class='item-card "+cls+"' href='"+esc(url)+"' target='_blank' rel='noopener noreferrer'>"+
-        "<img src='"+img+"' alt='' loading='lazy'>"+
+        "<img src='"+img+"' alt='' loading='lazy'"+onerr+">"+
         "<span class='ic-body'><span class='ic-title'>"+esc(title)+"</span>"+
         (desc ? "<span class='ic-desc'>"+esc(desc)+"</span>" : "")+
         "<span class='ic-url'>"+esc(go)+"</span></span></a>");
