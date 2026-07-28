@@ -1003,6 +1003,16 @@ function extractAttachmentsFromProject(p){
     }
   }
   
+  /* 삼중 보존 구조: 새로고침 또는 서버 동기화 지연 시에도 영구 보존 */
+  if (!atts.length && p.id != null){
+    var s1 = localStorage.getItem("appleseed_project_atts_id_" + p.id) || localStorage.getItem("appleseed_atts_id_" + p.id);
+    if (s1){ try { atts = JSON.parse(s1); } catch(e){} }
+  }
+  if (!atts.length && p.name != null){
+    var s2 = localStorage.getItem("appleseed_project_atts_name_" + String(p.name).trim()) || localStorage.getItem("appleseed_atts_name_" + String(p.name).trim());
+    if (s2){ try { atts = JSON.parse(s2); } catch(e){} }
+  }
+  
   /* 구글 시트 DB memos 테이블에서 온라인 파일 보관 데이터 조회 및 복원 */
   var memos = (state.data && Array.isArray(state.data.memos)) ? state.data.memos : [];
   var memoFileMap = {};
@@ -1038,6 +1048,10 @@ function getProjectAttachments(p){
 function saveProjectAttachments(projectId, attsArr, projectName){
   if (!projectId && !projectName) return;
   var cleanArr = Array.isArray(attsArr) ? attsArr : [];
+  
+  /* 새로고침 시 즉시 복구 가능하도록 동기적 보존 저장 */
+  if (projectId != null) localStorage.setItem("appleseed_project_atts_id_" + projectId, JSON.stringify(cleanArr));
+  if (projectName != null) localStorage.setItem("appleseed_project_atts_name_" + String(projectName).trim(), JSON.stringify(cleanArr));
   
   var targetP = null;
   if (state.data && state.data.projects){
