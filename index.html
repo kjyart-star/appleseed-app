@@ -616,8 +616,20 @@
   .gdrive-link-btn:hover{background:var(--accent-soft); border-color:var(--accent); color:var(--ink);}
   
   .att-form-box{
-    border:1px solid var(--line-strong); background:var(--surface-2); border-radius:10px;
-    padding:12px; display:flex; flex-direction:column; gap:10px;
+    border:2px dashed var(--line-strong); background:var(--surface-2); border-radius:12px;
+    padding:12px; display:flex; flex-direction:column; gap:10px; position:relative;
+    transition:all .2s ease;
+  }
+  .att-form-box.drag-over, .proj-card.att-drag-over{
+    border-color:var(--accent) !important; background:var(--accent-soft) !important;
+    box-shadow:0 0 0 3px rgba(92,187,146,0.2) !important;
+  }
+  .att-drop-hint{
+    font-size:12px; color:var(--ink-3); text-align:center; padding:8px; border:1px dashed var(--line); border-radius:8px;
+    background:var(--surface); display:flex; align-items:center; justify-content:center; gap:6px; user-select:none; transition:all .2s ease;
+  }
+  .att-form-box.drag-over .att-drop-hint, .proj-card.att-drag-over .att-drop-hint{
+    border-color:var(--accent); color:var(--accent-ink); font-weight:700; background:transparent;
   }
   .att-form-actions{display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
   .att-list-items{display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto;}
@@ -1148,6 +1160,52 @@ function formatBytes(bytes){
   var k=1024, sizes=["B","KB","MB","GB"], i=Math.floor(Math.log(bytes)/Math.log(k));
   return parseFloat((bytes/Math.pow(k,i)).toFixed(1)) + " " + sizes[i];
 }
+function addFilesToAtts(files, attArray, callback){
+  var filesArr = Array.from(files||[]);
+  if (!filesArr.length) return;
+  var nowStr = seoulNow().toISOString().slice(0,10);
+  var loadedN = 0;
+  filesArr.forEach(function(f){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var t = getAttType(f.name, f.type);
+      attArray.push({
+        id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+        name: f.name,
+        type: t,
+        url: e.target.result,
+        size: formatBytes(f.size),
+        date: nowStr
+      });
+      loadedN++;
+      if (loadedN === filesArr.length && typeof callback === "function"){
+        callback();
+      }
+    };
+    reader.readAsDataURL(f);
+  });
+}
+function setupDragAndDrop(box, onFilesDropped){
+  if (!box) return;
+  ['dragenter', 'dragover'].forEach(function(ev){
+    box.addEventListener(ev, function(e){
+      e.preventDefault(); e.stopPropagation();
+      box.classList.add('drag-over', 'att-drag-over');
+    }, false);
+  });
+  ['dragleave', 'drop'].forEach(function(ev){
+    box.addEventListener(ev, function(e){
+      e.preventDefault(); e.stopPropagation();
+      box.classList.remove('drag-over', 'att-drag-over');
+    }, false);
+  });
+  box.addEventListener('drop', function(e){
+    var files = e.dataTransfer ? e.dataTransfer.files : null;
+    if (files && files.length && typeof onFilesDropped === 'function'){
+      onFilesDropped(files);
+    }
+  }, false);
+}
 
 var FIELDS = {
   revenue: [ ["date","입금/발생일","date"], ["client","고객사","text"], ["item","항목","text"], ["amount","금액(원)","number"],
@@ -1200,6 +1258,7 @@ function openForm(table, row, defaults){
             "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/my-drive' target='_blank' rel='noopener'>📁 구글드라이브 (애플시드관리시스템/프로젝트관리) ↗</a>"+
             "<span style='font-size:11.5px; color:var(--ink-3);'>PDF, 이미지, 링크 등록</span>"+
           "</div>"+
+          "<div class='att-drop-hint'>📥 여기에 파일(PDF/이미지/문서)을 끌어다 놓으세요</div>"+
           "<div class='att-form-actions'>"+
             "<button type='button' class='btn sm primary' id='mAttBtnFile'>📁 파일 선택 (PDF/이미지/문서)</button>"+
             "<button type='button' class='btn sm ghost' id='mAttBtnLink'>🔗 링크/Drive URL 추가</button>"+
@@ -1233,10 +1292,17 @@ function openForm(table, row, defaults){
   document.body.appendChild(bg);
 
   /* 첨부파일 모달 이벤터 연동 */
+  var attFormBox = bg.querySelector("#f_attachments_box");
   var attFileInput = bg.querySelector("#mAttFileInput");
   var attItemsList = bg.querySelector("#mAttItemsList");
   var attBtnFile = bg.querySelector("#mAttBtnFile");
   var attBtnLink = bg.querySelector("#mAttBtnLink");
+
+  if (attFormBox){
+    setupDragAndDrop(attFormBox, function(files){
+      addFilesToAtts(files, currentAtts, renderModalAtts);
+    });
+  }
 
   function renderModalAtts(){
     if (!attItemsList) return;
@@ -1270,25 +1336,10 @@ function openForm(table, row, defaults){
   if (attBtnFile && attFileInput){
     attBtnFile.onclick = function(){ attFileInput.click(); };
     attFileInput.onchange = function(){
-      var files = Array.from(attFileInput.files||[]);
-      if (!files.length) return;
-      var nowStr = seoulNow().toISOString().slice(0,10);
-      files.forEach(function(f){
-        var reader = new FileReader();
-        reader.onload = function(e){
-          var t = getAttType(f.name, f.type);
-          currentAtts.push({
-            id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
-            name: f.name,
-            type: t,
-            url: e.target.result,
-            size: formatBytes(f.size),
-            date: nowStr
-          });
-          renderModalAtts();
-        };
-        reader.readAsDataURL(f);
-      });
+      var files = attFileInput.files;
+      if (files && files.length){
+        addFilesToAtts(files, currentAtts, renderModalAtts);
+      }
       attFileInput.value = "";
     };
   }
@@ -2232,10 +2283,11 @@ function mountProjectWorkspace(container){
 
     /* 프로젝트 첨부파일 & 구글드라이브 자료 카드리스트 */
     var atts = Array.isArray(p.attachments) ? p.attachments : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
-    html += "<section class='proj-card'><div class='proj-card-h'>📁 첨부파일 & 구글드라이브 자료"+
+    html += "<section class='proj-card' id='proj_att_card'><div class='proj-card-h'>📁 첨부파일 & 구글드라이브 자료"+
       "<span class='pc-sub'>PDF · 이미지 · Drive</span>"+
       "<a class='gdrive-link-btn' style='margin-left:auto; margin-bottom:0;' href='https://drive.google.com/drive/u/0/my-drive' target='_blank' rel='noopener'>📁 구글드라이브 ↗</a>"+
-      "<button class='btn sm ghost proj-mini-add' data-add-att>+ 첨부 추가</button></div>";
+      "<button class='btn sm ghost proj-mini-add' data-add-att>+ 첨부 추가</button></div>"+
+      "<div class='att-drop-hint' style='margin:10px 16px 0; cursor:pointer;' data-add-att>📥 여기에 파일(PDF/이미지/문서)을 끌어다 놓으시거나 클릭하여 추가하세요</div>";
     
     if (!atts.length){
       html += "<div class='proj-sub-empty'>등록된 첨부파일이나 구글드라이브 링크가 없습니다.<br>"+
@@ -2316,7 +2368,17 @@ function mountProjectWorkspace(container){
     detailEl.querySelector("[data-p-edit]").onclick = function(){ openForm("projects", p); };
     detailEl.querySelector("[data-p-del]").onclick = function(){ delRow("projects", p.id); };
 
-    /* 첨부자료 이벤트 연동 */
+    /* 첨부자료 드래그앤드롭 및 이벤트 연동 */
+    var attCard = detailEl.querySelector("#proj_att_card");
+    if (attCard){
+      setupDragAndDrop(attCard, function(files){
+        var curAtts = Array.isArray(p.attachments) ? p.attachments.slice() : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
+        addFilesToAtts(files, curAtts, function(){
+          crud("PATCH", "projects", p.id, { attachments: curAtts });
+        });
+      });
+    }
+
     detailEl.querySelectorAll("[data-add-att]").forEach(function(b){
       b.onclick = function(){ openQuickAttachmentDialog(p); };
     });
@@ -2422,7 +2484,8 @@ function openQuickAttachmentDialog(p){
         "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/my-drive' target='_blank' rel='noopener'>📁 구글드라이브 (애플시드관리시스템/프로젝트관리) 바로가기 ↗</a>"+
       "</div>"+
       "<div class='fld'><label>첨부파일 / 링크 추가 (PDF, 이미지, 외부링크)</label>"+
-        "<div class='att-form-box'>"+
+        "<div class='att-form-box' id='qAttFormBox'>"+
+          "<div class='att-drop-hint'>📥 여기에 파일(PDF/이미지/문서)을 끌어다 놓으세요</div>"+
           "<div class='att-form-actions'>"+
             "<button type='button' class='btn sm primary' id='qAttBtnFile'>📁 파일 선택 (PDF/이미지/문서)</button>"+
             "<button type='button' class='btn sm ghost' id='qAttBtnLink'>🔗 링크 / Drive URL 추가</button>"+
@@ -2439,10 +2502,17 @@ function openQuickAttachmentDialog(p){
   bg.querySelector("#qClose").onclick = close;
   bg.querySelector("#qCancel").onclick = close;
   
+  var qFormBox = bg.querySelector("#qAttFormBox");
   var qList = bg.querySelector("#qAttList");
   var qFileInput = bg.querySelector("#qFileInput");
   var qBtnFile = bg.querySelector("#qAttBtnFile");
   var qBtnLink = bg.querySelector("#qAttBtnLink");
+
+  if (qFormBox){
+    setupDragAndDrop(qFormBox, function(files){
+      addFilesToAtts(files, curAtts, renderQList);
+    });
+  }
 
   function renderQList(){
     if (!curAtts.length){
@@ -2474,25 +2544,10 @@ function openQuickAttachmentDialog(p){
 
   qBtnFile.onclick = function(){ qFileInput.click(); };
   qFileInput.onchange = function(){
-    var files = Array.from(qFileInput.files||[]);
-    if (!files.length) return;
-    var nowStr = seoulNow().toISOString().slice(0,10);
-    files.forEach(function(f){
-      var reader = new FileReader();
-      reader.onload = function(e){
-        var t = getAttType(f.name, f.type);
-        curAtts.push({
-          id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
-          name: f.name,
-          type: t,
-          url: e.target.result,
-          size: formatBytes(f.size),
-          date: nowStr
-        });
-        renderQList();
-      };
-      reader.readAsDataURL(f);
-    });
+    var files = qFileInput.files;
+    if (files && files.length){
+      addFilesToAtts(files, curAtts, renderQList);
+    }
     qFileInput.value = "";
   };
 
