@@ -1445,10 +1445,7 @@ async function addFilesToAtts(files, attArray, callback){
       var gId = null;
       
       try {
-        var chunkSize = 80 * 1024; // 80KB safe chunk size for Google Apps Script CacheService
-        var totalChunks = Math.ceil(pureBase64.length / chunkSize);
-        
-        if (totalChunks <= 1){
+        if (pureBase64.length < 9 * 1024 * 1024){
           var gResPromise = apiSend("POST", null, {
             action: "uploadDrive",
             folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
@@ -1456,37 +1453,32 @@ async function addFilesToAtts(files, attArray, callback){
             mimeType: f.type || "application/octet-stream",
             fileData: pureBase64
           });
-          var timeoutPromise = new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 15000); });
+          var timeoutPromise = new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 25000); });
           var gRes = await Promise.race([gResPromise, timeoutPromise]);
           if (gRes && gRes.ok && (gRes.fileUrl || gRes.downloadUrl)){
             finalUrl = gRes.downloadUrl || gRes.fileUrl;
             gId = gRes.fileId;
           }
         } else {
+          var chunkSize = 60 * 1024;
+          var totalChunks = Math.ceil(pureBase64.length / chunkSize);
           var uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).substr(2,6);
           var lastRes = null;
-          var batchSize = 3;
-          for (var cIdx = 0; cIdx < totalChunks; cIdx += batchSize){
-            var endIdx = Math.min(cIdx + batchSize, totalChunks);
-            var pct = Math.round((endIdx / totalChunks) * 100);
-            showUploadToast("구글드라이브 업로드 중... (" + pct + "% 완료) " + f.name, false);
-            
-            var batchPromises = [];
-            for (var b = cIdx; b < endIdx; b++){
-              var chunkData = pureBase64.substr(b * chunkSize, chunkSize);
-              batchPromises.push(apiSend("POST", null, {
-                action: "uploadChunk",
-                uploadId: uploadId,
-                chunkIndex: b,
-                totalChunks: totalChunks,
-                folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
-                fileName: f.name,
-                mimeType: f.type || "application/octet-stream",
-                chunkData: chunkData
-              }));
-            }
-            var results = await Promise.all(batchPromises);
-            if (results && results.length) lastRes = results[results.length - 1];
+          
+          for (var cIdx = 0; cIdx < totalChunks; cIdx++){
+            var pct = Math.round(((cIdx + 1) / totalChunks) * 100);
+            showUploadToast("대용량 구글드라이브 업로드 중... (" + pct + "% 완료) " + f.name, false);
+            var chunkData = pureBase64.substr(cIdx * chunkSize, chunkSize);
+            lastRes = await apiSend("POST", null, {
+              action: "uploadChunk",
+              uploadId: uploadId,
+              chunkIndex: cIdx,
+              totalChunks: totalChunks,
+              folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
+              fileName: f.name,
+              mimeType: f.type || "application/octet-stream",
+              chunkData: chunkData
+            });
           }
           if (lastRes && lastRes.ok && (lastRes.fileUrl || lastRes.downloadUrl)){
             finalUrl = lastRes.downloadUrl || lastRes.fileUrl;
