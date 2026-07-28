@@ -3672,6 +3672,11 @@ function renderGov(){
       bodyEl.innerHTML = "<div class='empty'>공고를 불러오지 못했습니다 ("+esc(String(e.message||e))+")</div>";
     });
   }
+  var refBtn = C.querySelector("[data-gov-refresh]"); if (refBtn) refBtn.onclick = function(){ load(true); };
+  if (searchEl) searchEl.oninput = function(){ govSearch = searchEl.value; drawBody(); };
+  load(false);
+}
+
 /* ============ 자료실 ============ */
 var libSearch = "";
 var libProjectFilter = "전체";
