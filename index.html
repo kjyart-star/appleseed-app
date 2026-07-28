@@ -1186,7 +1186,11 @@ async function apiSend(method, table, id, body){
   var attempts = 0, lastErr = null;
   while (attempts < 3){
     try {
-      var r = await fetch(GAS_URL, {
+      var targetUrl = GAS_URL;
+      if (payload && payload.action){
+        targetUrl += (targetUrl.indexOf("?") >= 0 ? "&" : "?") + "action=" + encodeURIComponent(payload.action) + "&key=" + encodeURIComponent(reqKey);
+      }
+      var r = await fetch(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(payload)
@@ -1199,7 +1203,7 @@ async function apiSend(method, table, id, body){
         localStorage.removeItem("appleseed_key");
         KEY = MASTER_KEY;
         payload.key = MASTER_KEY;
-        r = await fetch(GAS_URL, {
+        r = await fetch(targetUrl, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify(payload)
