@@ -1335,15 +1335,34 @@ function formatBytes(bytes){
   return parseFloat((bytes/Math.pow(k,i)).toFixed(1)) + " " + sizes[i];
 }
 
-function addFilesToAtts(files, attArray, callback){
+function showUploadToast(msg, isDone){
+  var toast = document.getElementById("appleseed_upload_toast");
+  if (!toast){
+    toast = document.createElement("div");
+    toast.id = "appleseed_upload_toast";
+    toast.style.cssText = "position:fixed; top:20px; right:20px; z-index:99999; background:#047857; color:#fff; padding:12px 20px; border-radius:10px; font-weight:600; font-size:14px; box-shadow:0 10px 25px rgba(0,0,0,0.3); display:flex; align-items:center; gap:8px; transition:all 0.3s ease;";
+    document.body.appendChild(toast);
+  }
+  toast.style.background = isDone ? "#059669" : "#047857";
+  toast.innerHTML = (isDone ? "✅ " : "⏳ ") + msg;
+  toast.style.display = "flex";
+  if (isDone){
+    setTimeout(function(){ if (toast) toast.style.display = "none"; }, 3500);
+  }
+}
+
+async function addFilesToAtts(files, attArray, callback){
   var filesArr = Array.from(files||[]);
   if (!filesArr.length) return;
   var nowStr = seoulNow().toISOString().slice(0,10);
-  var loadedN = 0;
+  var total = filesArr.length;
   
-  filesArr.forEach(function(f){
+  for (var idx = 0; idx < total; idx++){
+    var f = filesArr[idx];
     var attId = 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
     var t = getAttType(f.name, f.type);
+    
+    showUploadToast("구글드라이브 업로드 중... (" + (idx + 1) + "/" + total + ") " + f.name, false);
     
     var attObj = {
       id: attId,
@@ -1354,56 +1373,53 @@ function addFilesToAtts(files, attArray, callback){
       url: "memo:" + attId
     };
     
-    var reader = new FileReader();
-    reader.onload = function(e){
-      var dataUrl = e.target.result;
+    try {
+      var dataUrl = await new Promise(function(res, rej){
+        var reader = new FileReader();
+        reader.onload = function(e){ res(e.target.result); };
+        reader.onerror = function(err){ rej(err); };
+        reader.readAsDataURL(f);
+      });
+      
       var pureBase64 = dataUrl ? (dataUrl.split(",")[1] || dataUrl) : "";
-      
       attObj.url = dataUrl;
+      
+      if (f.size < 4000000){
+        try { localStorage.setItem("appleseed_att_data_" + attId, dataUrl); } catch(e){}
+      }
+      
+      /* 구글 드라이브 20TB 폴더로 직접 파일 생성을 시도 */
       try {
-        localStorage.setItem("appleseed_att_data_" + attId, dataUrl);
-      } catch(storageErr){ console.warn("LocalStorage full, stored in memory"); }
-      
-      attArray.push(attObj);
-      loadedN++;
-      
-      /* 백그라운드 서버 동기화 (오류 발생 시에도 앱 등록은 100% 보장) */
-      (async function(){
-        try {
-          var res = await apiSend("POST", null, {
-            action: "uploadDrive",
-            folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
-            fileName: f.name,
-            mimeType: f.type || "application/octet-stream",
-            fileData: pureBase64
-          });
-          if (res && res.ok && (res.fileUrl || res.downloadUrl)){
-            attObj.url = res.downloadUrl || res.fileUrl;
-            attObj.gdriveId = res.fileId;
-          } else {
-            /* 30,000자 단위 청크 분할하여 구글 시트 메모 테이블 안전 저장 */
-            var chunkSize = 30000;
-            var totalChunks = Math.ceil(dataUrl.length / chunkSize);
-            for (var cIdx = 0; cIdx < totalChunks; cIdx++){
-              var chunkStr = dataUrl.substr(cIdx * chunkSize, chunkSize);
-              await apiSend("POST", "memos", null, {
-                title: "[CHUNK:" + attId + ":" + cIdx + ":" + totalChunks + "]" + f.name,
-                content: chunkStr
-              });
-            }
+        var gRes = await apiSend("POST", null, {
+          action: "uploadDrive",
+          folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
+          fileName: f.name,
+          mimeType: f.type || "application/octet-stream",
+          fileData: pureBase64
+        });
+        if (gRes && gRes.ok && (gRes.fileUrl || gRes.downloadUrl)){
+          attObj.url = gRes.downloadUrl || gRes.fileUrl;
+          attObj.gdriveId = gRes.fileId;
+        } else if (f.size < 2000000) {
+          var chunkSize = 30000;
+          var totalChunks = Math.ceil(dataUrl.length / chunkSize);
+          for (var cIdx = 0; cIdx < totalChunks; cIdx++){
+            var chunkStr = dataUrl.substr(cIdx * chunkSize, chunkSize);
+            await apiSend("POST", "memos", null, {
+              title: "[CHUNK:" + attId + ":" + cIdx + ":" + totalChunks + "]" + f.name,
+              content: chunkStr
+            });
           }
-        } catch(asyncErr){ console.warn("Background sync warning:", asyncErr); }
-      })();
+        }
+      } catch(apiErr){ console.warn("Drive sync error:", apiErr); }
       
-      if (loadedN === filesArr.length && typeof callback === "function") callback();
-    };
-    reader.onerror = function(){
-      attArray.push(attObj);
-      loadedN++;
-      if (loadedN === filesArr.length && typeof callback === "function") callback();
-    };
-    reader.readAsDataURL(f);
-  });
+    } catch(readErr){ console.warn("FileReader error:", readErr); }
+    
+    attArray.push(attObj);
+    if (typeof callback === "function") callback();
+  }
+  
+  showUploadToast("구글드라이브 업로드 완료! (" + total + "개 파일)", true);
 }
 
 function handleFileUploadOrDrivePrompt(files, attArray, onComplete){
