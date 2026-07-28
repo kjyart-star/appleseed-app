@@ -1060,30 +1060,41 @@ function getProjectAttachments(p){
 
 var attMemoryCache = {};
 
-function saveProjectAttachments(projectId, attsArr, projectName){
+function saveProjectAttachments(projectId, attsArr, projectName, isOverwrite){
   if (!projectId && !projectName) return;
   var cleanArr = Array.isArray(attsArr) ? attsArr : [];
   
-  /* 기존 첨부파일 병합 및 중복 제거 (이전 파일이 지워지지 않고 누적 보존되도록) */
-  var existing = [];
-  if (projectId != null){
-    try {
-      var localSaved = localStorage.getItem("appleseed_project_atts_id_" + projectId);
-      if (localSaved) existing = JSON.parse(localSaved);
-    } catch(e){}
-  }
-  if (!existing.length && targetP && Array.isArray(targetP.attachments)){
-    existing = targetP.attachments;
+  var targetP = null;
+  if (state.data && state.data.projects){
+    state.data.projects.forEach(function(p){
+      if ((projectId && String(p.id) === String(projectId)) || (projectName && p.name === projectName)){
+        targetP = p;
+      }
+    });
   }
   
-  var mergedMap = {};
-  existing.concat(cleanArr).forEach(function(att){
-    if (att && (att.id || att.name)){
-      var key = att.id || att.name;
-      mergedMap[key] = att;
+  var finalArr = cleanArr;
+  if (!isOverwrite){
+    var existing = [];
+    if (projectId != null){
+      try {
+        var localSaved = localStorage.getItem("appleseed_project_atts_id_" + projectId);
+        if (localSaved) existing = JSON.parse(localSaved);
+      } catch(e){}
     }
-  });
-  var finalArr = Object.values(mergedMap);
+    if (!existing.length && targetP && Array.isArray(targetP.attachments)){
+      existing = targetP.attachments;
+    }
+    
+    var mergedMap = {};
+    existing.concat(cleanArr).forEach(function(att){
+      if (att && (att.id || att.name)){
+        var key = att.id || att.name;
+        mergedMap[key] = att;
+      }
+    });
+    finalArr = Object.values(mergedMap);
+  }
   
   /* 새로고침 시 즉시 복구 가능하도록 동기적 보존 저장 */
   try {
@@ -1091,15 +1102,7 @@ function saveProjectAttachments(projectId, attsArr, projectName){
     if (projectName != null) localStorage.setItem("appleseed_project_atts_name_" + String(projectName).trim(), JSON.stringify(finalArr));
   } catch(e){ console.warn("Quota exceeded for project atts list, stored in memory cache"); }
   
-  var targetP = null;
-  if (state.data && state.data.projects){
-    state.data.projects.forEach(function(p){
-      if ((projectId && String(p.id) === String(projectId)) || (projectName && p.name === projectName)){
-        p.attachments = finalArr;
-        targetP = p;
-      }
-    });
-  }
+  if (targetP) targetP.attachments = finalArr;
   
   /* 메타데이터만 next_action 서식 문자열에 저장 */
   var serverArr = finalArr.map(function(att){
@@ -1398,7 +1401,7 @@ async function addFilesToAtts(files, attArray, callback){
         reader.readAsDataURL(f);
       });
       
-      var pureBase64 = dataUrl ? (dataUrl.split(",")[1] || dataUrl) : "";
+      var pureBase64 = dataUrl ? String(dataUrl).replace(/^data:.*?;base64,/, "").replace(/[\r\n\s]/g, "") : "";
       attMemoryCache[attId] = dataUrl;
       
       if (f.size < 3000000){
@@ -2869,9 +2872,10 @@ function mountProjectWorkspace(container){
         var curAtts = getProjectAttachments(p);
         var removed = curAtts.splice(aIdx, 1);
         if (removed && removed[0] && removed[0].id){
+          delete attMemoryCache[removed[0].id];
           localStorage.removeItem("appleseed_att_data_" + removed[0].id);
         }
-        saveProjectAttachments(p.id, curAtts, p.name);
+        saveProjectAttachments(p.id, curAtts, p.name, true);
         drawDetail();
       };
     });
@@ -3033,8 +3037,11 @@ function openQuickAttachmentDialog(p){
       b.onclick = function(){
         var i = parseInt(b.getAttribute("data-qdel"), 10);
         var removed = curAtts.splice(i, 1);
-        if (removed && removed[0]) deleteFileFromIDB(removed[0].idbKey || removed[0].id);
-        saveProjectAttachments(p.id, curAtts, p.name);
+        if (removed && removed[0]){
+          delete attMemoryCache[removed[0].id];
+          localStorage.removeItem("appleseed_att_data_" + removed[0].id);
+        }
+        saveProjectAttachments(p.id, curAtts, p.name, true);
         renderQList();
         drawDetail();
       };
@@ -3889,8 +3896,12 @@ function renderLibrary(){
       var curAtts = getProjectAttachments(item.project);
       var attIdx = curAtts.findIndex(function(a){ return a.id === item.att.id || a.name === item.att.name; });
       if (attIdx >= 0){
-        curAtts.splice(attIdx, 1);
-        saveProjectAttachments(item.project.id, curAtts, item.projectName);
+        var removedItem = curAtts.splice(attIdx, 1);
+        if (removedItem && removedItem[0] && removedItem[0].id){
+          delete attMemoryCache[removedItem[0].id];
+          localStorage.removeItem("appleseed_att_data_" + removedItem[0].id);
+        }
+        saveProjectAttachments(item.project.id, curAtts, item.projectName, true);
         renderLibrary();
       }
     };
