@@ -1388,60 +1388,71 @@ async function addFilesToAtts(files, attArray, callback){
     var attId = 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
     var t = getAttType(f.name, f.type);
     
-    var attObj = {
-      id: attId,
-      name: f.name,
-      type: t,
-      size: formatBytes(f.size),
-      date: nowStr,
-      url: "memo:" + attId
-    };
+    showUploadToast("구글드라이브 업로드 중... (" + (idx + 1) + "/" + total + ") " + f.name, false);
     
-    /* 1. 0.01초 즉시 화면 카드 반영 (사용자가 기다리지 않음) */
-    attArray.push(attObj);
-    if (typeof callback === "function") callback();
-    
-    /* 2. 백그라운드 0.5초 구글드라이브 업로드 전송 */
-    (function(currentFile, targetAtt, fileIdx){
-      var reader = new FileReader();
-      reader.onload = async function(e){
-        var dataUrl = e.target.result;
-        var pureBase64 = dataUrl ? (dataUrl.split(",")[1] || dataUrl) : "";
-        targetAtt.url = dataUrl;
-        attMemoryCache[targetAtt.id] = dataUrl;
-        
-        if (currentFile.size < 3000000){
-          try { localStorage.setItem("appleseed_att_data_" + targetAtt.id, dataUrl); } catch(err){}
-        }
-        
-        showUploadToast("구글드라이브 전송 중... (" + (fileIdx + 1) + "/" + total + ") " + currentFile.name, false);
-        
-        try {
-          if (currentFile.size < 7000000){
-            var gRes = await apiSend("POST", null, {
-              action: "uploadDrive",
-              folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
-              fileName: currentFile.name,
-              mimeType: currentFile.type || "application/octet-stream",
-              fileData: pureBase64
-            });
-            if (gRes && gRes.ok && (gRes.fileUrl || gRes.downloadUrl)){
-              targetAtt.url = gRes.downloadUrl || gRes.fileUrl;
-              targetAtt.gdriveId = gRes.fileId;
-            }
-          } else {
-            console.log("Large file direct storage retained in memory/drive");
+    try {
+      var dataUrl = await new Promise(function(res, rej){
+        var reader = new FileReader();
+        reader.onload = function(e){ res(e.target.result || ""); };
+        reader.onerror = function(err){ rej(err); };
+        reader.readAsDataURL(f);
+      });
+      
+      var pureBase64 = dataUrl ? (dataUrl.split(",")[1] || dataUrl) : "";
+      attMemoryCache[attId] = dataUrl;
+      
+      if (f.size < 3000000){
+        try { localStorage.setItem("appleseed_att_data_" + attId, dataUrl); } catch(err){}
+      }
+      
+      var finalUrl = dataUrl;
+      var gId = null;
+      
+      try {
+        if (f.size < 7000000){
+          var gRes = await apiSend("POST", null, {
+            action: "uploadDrive",
+            folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
+            fileName: f.name,
+            mimeType: f.type || "application/octet-stream",
+            fileData: pureBase64
+          });
+          if (gRes && gRes.ok && (gRes.fileUrl || gRes.downloadUrl)){
+            finalUrl = gRes.downloadUrl || gRes.fileUrl;
+            gId = gRes.fileId;
           }
-        } catch(apiErr){ console.warn("Background drive upload note:", apiErr); }
-        
-        if (fileIdx === total - 1){
-          showUploadToast("구글드라이브 저장 완료! (" + total + "개 파일)", true);
         }
-        if (typeof callback === "function") callback();
+      } catch(apiErr){ console.warn("Google Drive upload warning:", apiErr); }
+      
+      var attObj = {
+        id: attId,
+        name: f.name,
+        type: t,
+        size: formatBytes(f.size),
+        date: nowStr,
+        url: finalUrl,
+        gdriveId: gId
       };
-      reader.readAsDataURL(currentFile);
-    })(f, attObj, idx);
+      
+      attArray.push(attObj);
+      if (typeof callback === "function") callback();
+      
+    } catch(err){
+      console.warn("File upload error:", err);
+      var fallbackObj = {
+        id: attId,
+        name: f.name,
+        type: t,
+        size: formatBytes(f.size),
+        date: nowStr,
+        url: "memo:" + attId
+      };
+      attArray.push(fallbackObj);
+      if (typeof callback === "function") callback();
+    }
   }
+  
+  showUploadToast("구글드라이브 저장 완료! (" + total + "개 파일)", true);
 }
 
 function handleFileUploadOrDrivePrompt(files, attArray, onComplete){
