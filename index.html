@@ -1128,6 +1128,23 @@ function saveProjectAttachments(projectId, attsArr, projectName, isOverwrite){
   }
 }
 
+function deleteAttachmentItem(projectId, curAtts, index, projectName, onDone){
+  var removed = curAtts.splice(index, 1);
+  if (removed && removed[0]){
+    var item = removed[0];
+    if (item.id){
+      delete attMemoryCache[item.id];
+      try { localStorage.removeItem("appleseed_att_data_" + item.id); } catch(e){}
+    }
+    var gId = item.gdriveId || (item.url && item.url.indexOf("id=") > -1 ? (item.url.match(/id=([a-zA-Z0-9_-]+)/) || [])[1] : null);
+    if (gId){
+      apiSend("POST", null, { action: "deleteDrive", fileId: gId }).catch(function(){});
+    }
+  }
+  saveProjectAttachments(projectId, curAtts, projectName, true);
+  if (typeof onDone === "function") onDone();
+}
+
 async function loadData(){
   if (window.__MOCK__){ state.data = window.__MOCK__; state.loading=false; return; }
   var startedAt = Date.now();
@@ -2884,13 +2901,7 @@ function mountProjectWorkspace(container){
         var ok = await confirmDlg("이 첨부자료를 삭제할까요?", "삭제", "첨부자료 삭제");
         if (!ok) return;
         var curAtts = getProjectAttachments(p);
-        var removed = curAtts.splice(aIdx, 1);
-        if (removed && removed[0] && removed[0].id){
-          delete attMemoryCache[removed[0].id];
-          localStorage.removeItem("appleseed_att_data_" + removed[0].id);
-        }
-        saveProjectAttachments(p.id, curAtts, p.name, true);
-        drawDetail();
+        deleteAttachmentItem(p.id, curAtts, aIdx, p.name, drawDetail);
       };
     });
     var am = detailEl.querySelector("[data-add-memo]"); if(am) am.onclick=function(){ openForm("memos", null, {title:"["+pname+"] "}); };
@@ -3050,14 +3061,10 @@ function openQuickAttachmentDialog(p){
     qList.querySelectorAll("[data-qdel]").forEach(function(b){
       b.onclick = function(){
         var i = parseInt(b.getAttribute("data-qdel"), 10);
-        var removed = curAtts.splice(i, 1);
-        if (removed && removed[0]){
-          delete attMemoryCache[removed[0].id];
-          localStorage.removeItem("appleseed_att_data_" + removed[0].id);
-        }
-        saveProjectAttachments(p.id, curAtts, p.name, true);
-        renderQList();
-        drawDetail();
+        deleteAttachmentItem(p.id, curAtts, i, p.name, function(){
+          renderQList();
+          drawDetail();
+        });
       };
     });
   }
@@ -3910,13 +3917,7 @@ function renderLibrary(){
       var curAtts = getProjectAttachments(item.project);
       var attIdx = curAtts.findIndex(function(a){ return a.id === item.att.id || a.name === item.att.name; });
       if (attIdx >= 0){
-        var removedItem = curAtts.splice(attIdx, 1);
-        if (removedItem && removedItem[0] && removedItem[0].id){
-          delete attMemoryCache[removedItem[0].id];
-          localStorage.removeItem("appleseed_att_data_" + removedItem[0].id);
-        }
-        saveProjectAttachments(item.project.id, curAtts, item.projectName, true);
-        renderLibrary();
+        deleteAttachmentItem(item.project.id, curAtts, attIdx, item.projectName, renderLibrary);
       }
     };
   });
