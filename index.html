@@ -2924,6 +2924,51 @@ function mountProjectWorkspace(container){
       };
     });
 
+    var cBtnFile = detailEl.querySelector("#cardBtnFile");
+    var cFileInput = detailEl.querySelector("#cardFileInput");
+    var cBtnLink = detailEl.querySelector("#cardBtnLink");
+    var cDropHint = detailEl.querySelector("#cardDropHint");
+    var cAttCard = detailEl.querySelector("#proj_att_card");
+
+    if (cBtnFile && cFileInput){
+      cBtnFile.onclick = function(){ cFileInput.click(); };
+      cFileInput.onchange = function(){
+        var files = cFileInput.files;
+        if (files && files.length){
+          var curAtts = getProjectAttachments(p);
+          handleFileUploadOrDrivePrompt(files, curAtts, function(){
+            saveProjectAttachments(p.id, curAtts, p.name);
+            drawDetail();
+          });
+        }
+      };
+    }
+
+    if (cBtnLink){
+      cBtnLink.onclick = function(){ openQuickAttachmentDialog(p); };
+    }
+
+    if (cDropHint && cFileInput){
+      cDropHint.onclick = function(){ cFileInput.click(); };
+    }
+
+    if (cAttCard && cFileInput){
+      cAttCard.ondragover = function(e){ e.preventDefault(); e.stopPropagation(); cAttCard.style.borderColor = "var(--primary)"; };
+      cAttCard.ondragleave = function(e){ e.preventDefault(); e.stopPropagation(); cAttCard.style.borderColor = ""; };
+      cAttCard.ondrop = function(e){
+        e.preventDefault(); e.stopPropagation();
+        cAttCard.style.borderColor = "";
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (files && files.length){
+          var curAtts = getProjectAttachments(p);
+          handleFileUploadOrDrivePrompt(files, curAtts, function(){
+            saveProjectAttachments(p.id, curAtts, p.name);
+            drawDetail();
+          });
+        }
+      };
+    }
+
     detailEl.querySelectorAll("[data-add-att]").forEach(function(b){
       b.onclick = function(){ openQuickAttachmentDialog(p); };
     });
