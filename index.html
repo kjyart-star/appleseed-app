@@ -1445,7 +1445,7 @@ async function addFilesToAtts(files, attArray, callback){
       var gId = null;
       
       try {
-        var chunkSize = 2 * 1024 * 1024;
+        var chunkSize = 80 * 1024; // 80KB safe chunk size for Google Apps Script CacheService
         var totalChunks = Math.ceil(pureBase64.length / chunkSize);
         
         if (totalChunks <= 1){
@@ -1465,21 +1465,28 @@ async function addFilesToAtts(files, attArray, callback){
         } else {
           var uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).substr(2,6);
           var lastRes = null;
-          for (var cIdx = 0; cIdx < totalChunks; cIdx++){
-            var chunkData = pureBase64.substr(cIdx * chunkSize, chunkSize);
-            showUploadToast("대용량 구글드라이브 업로드 중... (" + (cIdx + 1) + "/" + totalChunks + " 조각) " + f.name, false);
-            var cPromise = apiSend("POST", null, {
-              action: "uploadChunk",
-              uploadId: uploadId,
-              chunkIndex: cIdx,
-              totalChunks: totalChunks,
-              folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
-              fileName: f.name,
-              mimeType: f.type || "application/octet-stream",
-              chunkData: chunkData
-            });
-            var cTimeout = new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 20000); });
-            lastRes = await Promise.race([cPromise, cTimeout]);
+          var batchSize = 3;
+          for (var cIdx = 0; cIdx < totalChunks; cIdx += batchSize){
+            var endIdx = Math.min(cIdx + batchSize, totalChunks);
+            var pct = Math.round((endIdx / totalChunks) * 100);
+            showUploadToast("구글드라이브 업로드 중... (" + pct + "% 완료) " + f.name, false);
+            
+            var batchPromises = [];
+            for (var b = cIdx; b < endIdx; b++){
+              var chunkData = pureBase64.substr(b * chunkSize, chunkSize);
+              batchPromises.push(apiSend("POST", null, {
+                action: "uploadChunk",
+                uploadId: uploadId,
+                chunkIndex: b,
+                totalChunks: totalChunks,
+                folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
+                fileName: f.name,
+                mimeType: f.type || "application/octet-stream",
+                chunkData: chunkData
+              }));
+            }
+            var results = await Promise.all(batchPromises);
+            if (results && results.length) lastRes = results[results.length - 1];
           }
           if (lastRes && lastRes.ok && (lastRes.fileUrl || lastRes.downloadUrl)){
             finalUrl = lastRes.downloadUrl || lastRes.fileUrl;
@@ -1571,7 +1578,20 @@ async function openAttachmentPreview(att){
     var isPdf = (att.type || "").toLowerCase() === "pdf" || /\.pdf$/i.test(att.name || "");
     var isImg = (att.type || "").toLowerCase() === "image" || /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(att.name || "");
     if (isPdf){
-      contentHtml = "<iframe src='"+url+"' style='width:100%; height:100%; flex:1; min-height:65vh; border:none; border-radius:8px; background:#fff;'></iframe>";
+      try {
+        var base64Parts = url.split(",");
+        var mimeMatch = base64Parts[0].match(/:(.*?);/);
+        var mime = mimeMatch ? mimeMatch[1] : "application/pdf";
+        var bstr = atob(base64Parts[1]);
+        var n = bstr.length;
+        var u8arr = new Uint8Array(n);
+        while(n--){ u8arr[n] = bstr.charCodeAt(n); }
+        var blob = new Blob([u8arr], {type: mime});
+        var blobUrl = URL.createObjectURL(blob);
+        contentHtml = "<iframe src='"+blobUrl+"' style='width:100%; height:100%; flex:1; min-height:65vh; border:none; border-radius:8px; background:#fff;'></iframe>";
+      } catch(pdfErr){
+        contentHtml = "<iframe src='"+url+"' style='width:100%; height:100%; flex:1; min-height:65vh; border:none; border-radius:8px; background:#fff;'></iframe>";
+      }
     } else if (isImg){
       contentHtml = "<div style='text-align:center; padding:10px; height:100%; overflow:auto; display:flex; align-items:center; justify-content:center;'><img src='"+url+"' style='max-width:100%; max-height:85vh; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.4); object-fit:contain;'></div>";
     } else {
