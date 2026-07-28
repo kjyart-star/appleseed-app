@@ -1012,6 +1012,15 @@ function extractAttachmentsFromProject(p){
     if (s2){ try { atts = JSON.parse(s2); } catch(e){} }
   }
   
+  var gdriveFolderUrl = "https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41";
+  (Array.isArray(atts)?atts:[]).forEach(function(att){
+    if (att && att.url && att.url.indexOf("local:") === 0){
+      var localId = att.url.replace("local:", "");
+      var storedData = localStorage.getItem("appleseed_att_data_" + localId);
+      att.url = storedData || gdriveFolderUrl;
+    }
+  });
+  
   return { nextAction: cleanAction, attachments: Array.isArray(atts) ? atts : [] };
 }
 
@@ -1033,16 +1042,25 @@ function saveProjectAttachments(projectId, attsArr, projectName){
     });
   }
   
+  /* 구글 시트 셀 용량 초과(5만 자 제한)를 방지하기 위해 대용량 DataURL은 분리 보관 */
+  var serverArr = cleanArr.map(function(att){
+    var copy = Object.assign({}, att);
+    if (copy.url && copy.url.indexOf("data:") === 0 && copy.url.length > 300){
+      localStorage.setItem("appleseed_att_data_" + copy.id, copy.url);
+      copy.url = "local:" + copy.id;
+    }
+    return copy;
+  });
+  
   var currentAction = targetP ? (targetP.next_action || "") : "";
   var cleanText = currentAction.replace(/\[ATTS:.*?\]/g, "").trim();
-  var newNextActionStr = cleanArr.length > 0
-    ? (cleanText ? cleanText + " " : "") + "[ATTS:" + JSON.stringify({ attachments: cleanArr }) + "]"
+  var newNextActionStr = serverArr.length > 0
+    ? (cleanText ? cleanText + " " : "") + "[ATTS:" + JSON.stringify({ attachments: serverArr }) + "]"
     : cleanText;
   
   if (targetP) targetP.next_action = newNextActionStr;
   
   if (projectId != null){
-    /* Google Sheets DB 권한 오류(unauthorized) 방지를 위해 next_action 서식 문자열만 서버로 전송 */
     crud("PATCH", "projects", projectId, { next_action: newNextActionStr });
   }
 }
@@ -2730,7 +2748,9 @@ function mountProjectWorkspace(container){
         if (!ok) return;
         var curAtts = getProjectAttachments(p);
         var removed = curAtts.splice(aIdx, 1);
-        if (removed && removed[0]) deleteFileFromIDB(removed[0].idbKey || removed[0].id);
+        if (removed && removed[0] && removed[0].id){
+          localStorage.removeItem("appleseed_att_data_" + removed[0].id);
+        }
         saveProjectAttachments(p.id, curAtts, p.name);
         drawDetail();
       };
