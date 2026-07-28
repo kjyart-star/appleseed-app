@@ -977,6 +977,42 @@ function applyTombstones(d){
   }
   return d;
 }
+function getProjectAttachments(p){
+  if (!p) return [];
+  var localKey = "appleseed_atts_" + p.id;
+  var stored = localStorage.getItem(localKey);
+  if (stored){
+    try {
+      var arr = JSON.parse(stored);
+      if (Array.isArray(arr) && arr.length > 0) return arr;
+    } catch(e){}
+  }
+  if (Array.isArray(p.attachments) && p.attachments.length > 0) return p.attachments;
+  if (typeof p.attachments === "string" && p.attachments.trim()){
+    try {
+      var a = JSON.parse(p.attachments);
+      if (Array.isArray(a)) return a;
+    } catch(e){}
+  }
+  return (Array.isArray(p.attachments) ? p.attachments : []);
+}
+
+function saveProjectAttachments(projectId, attsArr){
+  if (!projectId) return;
+  var key = "appleseed_atts_" + projectId;
+  var cleanArr = Array.isArray(attsArr) ? attsArr : [];
+  localStorage.setItem(key, JSON.stringify(cleanArr));
+  
+  if (state.data && state.data.projects){
+    state.data.projects.forEach(function(p){
+      if (String(p.id) === String(projectId)){
+        p.attachments = cleanArr;
+      }
+    });
+  }
+  crud("PATCH", "projects", projectId, { attachments: cleanArr });
+}
+
 async function loadData(){
   if (window.__MOCK__){ state.data = window.__MOCK__; state.loading=false; return; }
   var startedAt = Date.now();
@@ -988,6 +1024,11 @@ async function loadData(){
   /* 이 조회가 시작된 뒤에 변이가 있었다면(또는 변이 진행 중) 낡은 스냅샷이므로 버림 */
   if (startedAt < lastMutationAt){ state.loading = false; return; }
   state.data = applyTombstones(j);
+  if (state.data && state.data.projects){
+    state.data.projects.forEach(function(p){
+      p.attachments = getProjectAttachments(p);
+    });
+  }
   state.loading = false;
 }
 async function apiSend(method, table, id, body){
@@ -1042,7 +1083,14 @@ async function crud(method, table, id, body){
           /* 진행 중이던 조회가 임시 행을 덮어썼다면 확정 행을 다시 넣음 */
           if (!found && !cur.some(function(r){ return String(r.id) === String(res.row.id); })) cur.push(res.row);
         } else if (method === "PATCH"){
-          for (var j=0;j<cur.length;j++){ if (String(cur[j].id) === String(id)){ cur[j] = res.row; break; } }
+          for (var j=0;j<cur.length;j++){
+            if (String(cur[j].id) === String(id)){
+              var existingAtts = getProjectAttachments(cur[j]);
+              cur[j] = res.row;
+              cur[j].attachments = getProjectAttachments(cur[j]).length > 0 ? getProjectAttachments(cur[j]) : existingAtts;
+              break;
+            }
+          }
         }
         render();
       }
@@ -1424,7 +1472,7 @@ var BOOLS = { done:1, all_day:1 };
 function openForm(table, row, defaults){
   var fields = FIELDS[table]; var editing = !!row;
   var body = "";
-  var currentAtts = (row && row.attachments) ? (Array.isArray(row.attachments) ? row.attachments.slice() : (typeof row.attachments==='string' ? JSON.parse(row.attachments||"[]") : [])) : [];
+  var currentAtts = (row && row.attachments) ? getProjectAttachments(row) : [];
   
   fields.forEach(function(f){
     var name=f[0], label=f[1], type=f[2], opts=f[3];
@@ -2480,7 +2528,7 @@ function mountProjectWorkspace(container){
       "</div></section>";
 
     /* 프로젝트 첨부파일 & 구글드라이브 자료 카드리스트 */
-    var atts = Array.isArray(p.attachments) ? p.attachments : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
+    var atts = getProjectAttachments(p);
     html += "<section class='proj-card' id='proj_att_card'><div class='proj-card-h'>📁 첨부파일 & 구글드라이브 자료"+
       "<span class='pc-sub'>PDF · 이미지 · Drive</span>"+
       "<a class='gdrive-link-btn' style='margin-left:auto; margin-bottom:0;' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener'>📁 구글드라이브 ↗</a>"+
@@ -2573,9 +2621,10 @@ function mountProjectWorkspace(container){
     var attCard = detailEl.querySelector("#proj_att_card");
     if (attCard){
       setupDragAndDrop(attCard, function(files){
-        var curAtts = Array.isArray(p.attachments) ? p.attachments.slice() : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
+        var curAtts = getProjectAttachments(p);
         handleFileUploadOrDrivePrompt(files, curAtts, function(){
-          crud("PATCH", "projects", p.id, { attachments: curAtts });
+          saveProjectAttachments(p.id, curAtts);
+          drawDetail();
         });
       });
     }
@@ -2583,21 +2632,21 @@ function mountProjectWorkspace(container){
     detailEl.querySelectorAll("[data-att-view-proj]").forEach(function(b){
       b.onclick = function(){
         var aIdx = parseInt(b.getAttribute("data-att-view-proj"), 10);
-        var curAtts = Array.isArray(p.attachments) ? p.attachments : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
+        var curAtts = getProjectAttachments(p);
         openAttachmentPreview(curAtts[aIdx]);
       };
     });
     detailEl.querySelectorAll("[data-preview-img]").forEach(function(img){
       img.onclick = function(){
         var aIdx = parseInt(img.getAttribute("data-preview-img"), 10);
-        var curAtts = Array.isArray(p.attachments) ? p.attachments : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
+        var curAtts = getProjectAttachments(p);
         openAttachmentPreview(curAtts[aIdx]);
       };
     });
     detailEl.querySelectorAll("[data-att-dl-proj]").forEach(function(b){
       b.onclick = function(){
         var aIdx = parseInt(b.getAttribute("data-att-dl-proj"), 10);
-        var curAtts = Array.isArray(p.attachments) ? p.attachments : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
+        var curAtts = getProjectAttachments(p);
         downloadAttachment(curAtts[aIdx]);
       };
     });
@@ -2610,10 +2659,11 @@ function mountProjectWorkspace(container){
         var aIdx = parseInt(b.getAttribute("data-att-del-proj"), 10);
         var ok = await confirmDlg("이 첨부자료를 삭제할까요?", "삭제", "첨부자료 삭제");
         if (!ok) return;
-        var curAtts = Array.isArray(p.attachments) ? p.attachments.slice() : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
+        var curAtts = getProjectAttachments(p);
         var removed = curAtts.splice(aIdx, 1);
         if (removed && removed[0]) deleteFileFromIDB(removed[0].idbKey || removed[0].id);
-        crud("PATCH", "projects", p.id, { attachments: curAtts });
+        saveProjectAttachments(p.id, curAtts);
+        drawDetail();
       };
     });
     var am = detailEl.querySelector("[data-add-memo]"); if(am) am.onclick=function(){ openForm("memos", null, {title:"["+pname+"] "}); };
@@ -2701,7 +2751,7 @@ function mountProjectWorkspace(container){
 }
 
 function openQuickAttachmentDialog(p){
-  var curAtts = Array.isArray(p.attachments) ? p.attachments.slice() : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
+  var curAtts = getProjectAttachments(p);
   var bg = el("<div class='modal-bg'><div class='modal'><div class='modal-h'><h3>📁 프로젝트 첨부자료 · "+esc(p.name||"")+"</h3><button class='icon-btn' id='qClose'>✕</button></div>"+
     "<div class='modal-b'>"+
       "<div class='fld'><label>구글드라이브 저장소</label>"+
