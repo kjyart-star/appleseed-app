@@ -849,8 +849,9 @@
 "use strict";
 
 /* ============ 접근 키 ============ */
+var MASTER_KEY = "72ddd03745f902086cd1eea4"; /* 내장 마스터 키 */
 var qs = new URLSearchParams(location.search);
-var KEY = qs.get("key") || localStorage.getItem("appleseed_key") || "72ddd03745f902086cd1eea4"; /* 로컬 실행본 전용 내장 키 — 외부 공유 금지 */
+var KEY = qs.get("key") || localStorage.getItem("appleseed_key") || MASTER_KEY;
 if (qs.get("key")) localStorage.setItem("appleseed_key", qs.get("key"));
 
 /* ============ 상태 ============ */
@@ -1049,10 +1050,20 @@ function saveProjectAttachments(projectId, attsArr, projectName){
 async function loadData(){
   if (window.__MOCK__){ state.data = window.__MOCK__; state.loading=false; return; }
   var startedAt = Date.now();
+  var reqKey = KEY || MASTER_KEY;
   /* &t= 캐시버스터: 쓰기 직후 재조회가 브라우저/중간 캐시에 걸리지 않게 */
-  var r = await fetch(GAS_URL + "?action=data&key=" + encodeURIComponent(KEY) + "&t=" + Date.now(), { cache: "no-store" });
+  var r = await fetch(GAS_URL + "?action=data&key=" + encodeURIComponent(reqKey) + "&t=" + Date.now(), { cache: "no-store" });
   if (!r.ok){ throw new Error("HTTP "+r.status); }
-  var j = await r.json();
+  var j = await r.json().catch(function(){ return {}; });
+  
+  /* 저장된 키가 무효/구버전인 경우 마스터 키로 자동 복구 후 재시도 */
+  if (j && j.error === "unauthorized" && reqKey !== MASTER_KEY){
+    localStorage.removeItem("appleseed_key");
+    KEY = MASTER_KEY;
+    r = await fetch(GAS_URL + "?action=data&key=" + encodeURIComponent(MASTER_KEY) + "&t=" + Date.now(), { cache: "no-store" });
+    if (r.ok) j = await r.json().catch(function(){ return {}; });
+  }
+  
   if (j && j.error) throw new Error(j.error);
   /* 이 조회가 시작된 뒤에 변이가 있었다면(또는 변이 진행 중) 낡은 스냅샷이므로 버림 */
   if (startedAt < lastMutationAt){ state.loading = false; return; }
@@ -1063,12 +1074,22 @@ async function loadData(){
     });
   }
   state.loading = false;
+  state.error = null;
 }
 async function apiSend(method, table, id, body){
   if (window.__MOCK__){ alert("목 모드: 저장은 실서버에서만 동작합니다."); return null; }
   var action = method==="POST"?"insert":method==="PATCH"?"update":"delete";
-  var r = await fetch(GAS_URL, { method:"POST", body: JSON.stringify({ key:KEY, action:action, table:table, id:id||null, row:body||null }) });
+  var reqKey = KEY || MASTER_KEY;
+  var r = await fetch(GAS_URL, { method:"POST", body: JSON.stringify({ key:reqKey, action:action, table:table, id:id||null, row:body||null }) });
   var j = await r.json().catch(function(){return{};});
+  
+  if (j && j.error === "unauthorized" && reqKey !== MASTER_KEY){
+    localStorage.removeItem("appleseed_key");
+    KEY = MASTER_KEY;
+    r = await fetch(GAS_URL, { method:"POST", body: JSON.stringify({ key:MASTER_KEY, action:action, table:table, id:id||null, row:body||null }) });
+    if (r.ok) j = await r.json().catch(function(){return{};});
+  }
+  
   if (!r.ok) throw new Error(j.error || ("HTTP "+r.status));
   if (j && j.error) throw new Error(j.error);
   return j;
@@ -3746,7 +3767,17 @@ function render(){
   C.classList.toggle("crm-wide", route==="projects");
   var tb = document.querySelector(".tb-title"); if(tb) tb.textContent = TITLES[route]||"애플시드";
   if (state.loading){ C.innerHTML = "<div class='empty' style='padding:80px 20px'>데이터를 불러오는 중…</div>"; return; }
-  if (state.error){ C.innerHTML = "<div class='placeholder' style='margin:40px auto;max-width:520px'><div class='ico'>⚠️</div><h3>데이터를 불러오지 못했습니다</h3><p>"+esc(state.error)+"</p></div>"; return; }
+  if (state.error){
+    C.innerHTML = "<div class='placeholder' style='margin:40px auto;max-width:520px'><div class='ico'>⚠️</div><h3>데이터를 불러오지 못했습니다</h3><p style='margin-bottom:16px;'>"+esc(state.error)+"</p><button class='btn primary' id='resetKeyRetryBtn'>🔄 접속 키 초기화 및 재접속</button></div>";
+    var btn = C.querySelector("#resetKeyRetryBtn");
+    if (btn){
+      btn.onclick = function(){
+        localStorage.removeItem("appleseed_key");
+        location.href = location.pathname;
+      };
+    }
+    return;
+  }
   var placeholder = false;
   MENU.forEach(function(g){ g.items.forEach(function(it){ if(it[0]===route && it[3]) placeholder=true; }); });
   if (placeholder || !ROUTES[route]) renderPlaceholder(route);
