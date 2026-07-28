@@ -1381,9 +1381,9 @@ async function openAttachmentPreview(att){
 
   var contentHtml = "";
   if (isPdf){
-    contentHtml = "<iframe src='"+blobUrl+"' style='width:100%; height:75vh; border:none; border-radius:8px; background:#fff;'></iframe>";
+    contentHtml = "<iframe src='"+blobUrl+"' style='width:100%; height:100%; flex:1; min-height:65vh; border:none; border-radius:8px; background:#fff;'></iframe>";
   } else if (isImg){
-    contentHtml = "<div style='text-align:center; padding:10px; max-height:75vh; overflow:auto;'><img src='"+blobUrl+"' style='max-width:100%; max-height:70vh; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.4); object-fit:contain;'></div>";
+    contentHtml = "<div style='text-align:center; padding:10px; height:100%; overflow:auto; display:flex; align-items:center; justify-content:center;'><img src='"+blobUrl+"' style='max-width:100%; max-height:85vh; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.4); object-fit:contain;'></div>";
   } else {
     contentHtml = "<div style='text-align:center; padding:40px 20px;'><div style='font-size:36px; margin-bottom:12px;'>📁</div>"+
       "<h4>"+esc(att.name||"")+"</h4>"+
@@ -1391,14 +1391,42 @@ async function openAttachmentPreview(att){
       "<button class='btn primary' style='margin-top:16px;' id='pDlMidBtn'>💾 파일 다운로드 ("+esc(att.size||"")+")</button></div>";
   }
 
-  var bg = el("<div class='modal-bg' style='z-index:9999;'><div class='modal' style='max-width:900px; width:94%; max-height:92vh;'><div class='modal-h'><h3>👁️ "+esc(att.name||"첨부파일 미리보기")+"</h3>"+
-    "<div style='display:flex; gap:8px; align-items:center;'>"+
-      "<button class='btn sm primary' id='pDlBtn'>💾 다운로드</button>"+
-      "<button class='icon-btn' id='pClose'>✕</button>"+
-    "</div></div>"+
-    "<div class='modal-b' style='padding:12px;'>"+contentHtml+"</div></div></div>");
+  var bg = el("<div class='modal-bg' style='z-index:9999;'>"+
+    "<div class='modal' id='attPreviewModal' style='max-width:1100px; width:95%; height:88vh; display:flex; flex-direction:column; resize:both; overflow:auto; min-width:480px; min-height:360px;'>"+
+      "<div class='modal-h' style='flex-shrink:0;'>"+
+        "<h3>👁️ "+esc(att.name||"첨부파일 미리보기")+"</h3>"+
+        "<div style='display:flex; gap:6px; align-items:center; flex-wrap:wrap;'>"+
+          "<a class='btn sm ghost' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener' title='구글드라이브 프로젝트관리 폴더 바로가기'>☁️ 구글드라이브 ↗</a>"+
+          "<button type='button' class='btn sm ghost' id='pSizeToggleBtn' title='전체화면 / 창 크기 조절'>🔲 전체화면</button>"+
+          "<button type='button' class='btn sm primary' id='pDlBtn'>💾 다운로드</button>"+
+          "<button type='button' class='icon-btn' id='pClose'>✕</button>"+
+        "</div>"+
+      "</div>"+
+      "<div class='modal-b' style='flex:1; padding:8px; display:flex; flex-direction:column; overflow:hidden;'>"+contentHtml+"</div>"+
+    "</div></div>");
 
   document.body.appendChild(bg);
+
+  var modalEl = bg.querySelector("#attPreviewModal");
+  var sizeBtn = bg.querySelector("#pSizeToggleBtn");
+  var isFull = false;
+
+  if (sizeBtn && modalEl){
+    sizeBtn.onclick = function(){
+      isFull = !isFull;
+      if (isFull){
+        modalEl.style.maxWidth = "98vw";
+        modalEl.style.width = "98vw";
+        modalEl.style.height = "96vh";
+        sizeBtn.textContent = "↙️ 창 크기 복원";
+      } else {
+        modalEl.style.maxWidth = "1100px";
+        modalEl.style.width = "95%";
+        modalEl.style.height = "88vh";
+        sizeBtn.textContent = "🔲 전체화면";
+      }
+    };
+  }
   
   function closeModal(){
     bg.remove();
