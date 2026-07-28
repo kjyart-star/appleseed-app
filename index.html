@@ -957,7 +957,7 @@ function parseDate(s){ if(!s) return null; var p=String(s).slice(0,10).split("-"
 var DOW = ["일","월","화","수","목","금","토"];
 
 /* ============ API ============ */
-var GAS_URL = "https://script.google.com/macros/s/AKfycbwDRtshu8F5CBtGb7hQTrMB6EakN01IHG-GgPApa1STRLkEPlqQxF2HJccFZo6_UNGz/exec";
+var GAS_URL = "https://script.google.com/macros/s/AKfycbw2XRMfFv3atL4PM1eJpT0P5WIqd2MQM1cstyO8qjc9SFKBH-S2-Zu_Mbq1YyFUH8p1/exec";
 /* 변이(추가·수정·삭제)와 조회의 경합 방지:
    - lastMutationAt: 변이가 시작·완료된 시각. 그 이전에 시작된 조회 응답은 낡은 데이터이므로 폐기.
    - tombstones: 최근 삭제한 행 id. 서버 반영 지연 중 조회가 가져와도 화면에 되살리지 않음. */
