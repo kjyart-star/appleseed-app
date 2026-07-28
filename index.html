@@ -1406,9 +1406,11 @@ function showUploadToast(msg, isDone){
   toast.style.background = isDone ? "#059669" : "#047857";
   toast.innerHTML = (isDone ? "✅ " : "⏳ ") + msg;
   toast.style.display = "flex";
-  if (isDone){
-    setTimeout(function(){ if (toast) toast.style.display = "none"; }, 3500);
-  }
+  
+  if (window.__toastTimer) clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(function(){
+    if (toast) toast.style.display = "none";
+  }, isDone ? 3000 : 7000);
 }
 
 async function addFilesToAtts(files, attArray, callback){
@@ -1443,13 +1445,20 @@ async function addFilesToAtts(files, attArray, callback){
       var gId = null;
       
       try {
-        var gRes = await apiSend("POST", null, {
+        var gResPromise = apiSend("POST", null, {
           action: "uploadDrive",
           folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
           fileName: f.name,
           mimeType: f.type || "application/octet-stream",
           fileData: pureBase64
         });
+        
+        var timeoutPromise = new Promise(function(resolve){
+          setTimeout(function(){ resolve(null); }, 12000);
+        });
+        
+        var gRes = await Promise.race([gResPromise, timeoutPromise]);
+        
         if (gRes && gRes.ok && (gRes.fileUrl || gRes.downloadUrl)){
           finalUrl = gRes.downloadUrl || gRes.fileUrl;
           gId = gRes.fileId;
