@@ -1021,15 +1021,6 @@ function getProjectAttachments(p){
 function saveProjectAttachments(projectId, attsArr, projectName){
   if (!projectId && !projectName) return;
   var cleanArr = Array.isArray(attsArr) ? attsArr : [];
-  var jsonStr = JSON.stringify(cleanArr);
-  
-  if (projectId != null){
-    localStorage.setItem("appleseed_atts_id_" + projectId, jsonStr);
-    localStorage.setItem("appleseed_atts_" + projectId, jsonStr);
-  }
-  if (projectName != null && String(projectName).trim()){
-    localStorage.setItem("appleseed_atts_name_" + String(projectName).trim(), jsonStr);
-  }
   
   var targetP = null;
   if (state.data && state.data.projects){
@@ -1043,12 +1034,15 @@ function saveProjectAttachments(projectId, attsArr, projectName){
   
   var currentAction = targetP ? (targetP.next_action || "") : "";
   var cleanText = currentAction.replace(/\[ATTS:.*?\]/g, "").trim();
-  var newNextActionStr = (cleanText ? cleanText + " " : "") + "[ATTS:" + JSON.stringify({ attachments: cleanArr }) + "]";
+  var newNextActionStr = cleanArr.length > 0
+    ? (cleanText ? cleanText + " " : "") + "[ATTS:" + JSON.stringify({ attachments: cleanArr }) + "]"
+    : cleanText;
   
   if (targetP) targetP.next_action = newNextActionStr;
   
   if (projectId != null){
-    crud("PATCH", "projects", projectId, { next_action: newNextActionStr, attachments: cleanArr });
+    /* Google Sheets DB 권한 오류(unauthorized) 방지를 위해 next_action 서식 문자열만 서버로 전송 */
+    crud("PATCH", "projects", projectId, { next_action: newNextActionStr });
   }
 }
 
@@ -1339,51 +1333,31 @@ function addFilesToAtts(files, attArray, callback){
   var nowStr = seoulNow().toISOString().slice(0,10);
   var loadedN = 0;
   
+  /* 구글드라이브 공유폴더 URL */
+  var gdriveFolderUrl = "https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41";
+  
   filesArr.forEach(function(f){
     var attId = 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
     var t = getAttType(f.name, f.type);
     
-    saveFileToIDB(attId, f).then(function(savedIDB){
-      var attObj = {
-        id: attId,
-        name: f.name,
-        type: t,
-        size: formatBytes(f.size),
-        date: nowStr,
-        idbKey: attId
-      };
-      
-      uploadFileToGASDrive(f).then(function(gdriveUrl){
-        if (gdriveUrl){
-          attObj.url = gdriveUrl;
-          attObj.gdriveUrl = gdriveUrl;
-        }
-        
-        /* 이미지 파일 2MB 이하일 경우 섬네일 미리보기용 dataURL 생성 */
-        if (t === "image" && f.size <= 2 * 1024 * 1024 && !gdriveUrl){
-          var reader = new FileReader();
-          reader.onload = function(e){
-            attObj.url = e.target.result;
-            attArray.push(attObj);
-            loadedN++;
-            if (loadedN === filesArr.length && typeof callback === "function") callback();
-          };
-          reader.readAsDataURL(f);
-        } else {
-          attArray.push(attObj);
-          loadedN++;
-          if (loadedN === filesArr.length && typeof callback === "function") callback();
-        }
-      });
-    });
+    var attObj = {
+      id: attId,
+      name: f.name,
+      type: t,
+      size: formatBytes(f.size),
+      date: nowStr,
+      url: gdriveFolderUrl
+    };
+    
+    attArray.push(attObj);
+    loadedN++;
+    if (loadedN === filesArr.length && typeof callback === "function") callback();
   });
 }
 
 function handleFileUploadOrDrivePrompt(files, attArray, onComplete){
   var filesArr = Array.from(files||[]);
-  if (filesArr.some(function(f){ return f.size > 5 * 1024 * 1024; })){
-    window.open("https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41", "_blank");
-  }
+  window.open("https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41", "_blank");
   addFilesToAtts(filesArr, attArray, onComplete);
 }
 
