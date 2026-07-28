@@ -1412,7 +1412,7 @@ async function addFilesToAtts(files, attArray, callback){
       var gId = null;
       
       try {
-        if (f.size < 7000000){
+        if (f.size < 40000000){
           var gRes = await apiSend("POST", null, {
             action: "uploadDrive",
             folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
