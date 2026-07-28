@@ -977,27 +977,45 @@ function applyTombstones(d){
   }
   return d;
 }
-function getProjectAttachments(p){
-  if (!p) return [];
-  var arr = null;
-  /* 1. ID 기준 조회 (아이디 변경/동기화 보완) */
-  if (p.id != null){
-    var s1 = localStorage.getItem("appleseed_atts_id_" + p.id) || localStorage.getItem("appleseed_atts_" + p.id);
-    if (s1){ try { arr = JSON.parse(s1); } catch(e){} }
+function extractAttachmentsFromProject(p){
+  if (!p) return { nextAction: "", attachments: [] };
+  var rawAction = p.next_action || "";
+  var atts = [];
+  var cleanAction = rawAction;
+  
+  if (rawAction.indexOf("[ATTS:") >= 0){
+    var parts = rawAction.split("[ATTS:");
+    cleanAction = parts[0].trim();
+    var jsonPart = parts[1].split("]")[0];
+    try {
+      var parsed = JSON.parse(jsonPart);
+      if (parsed && Array.isArray(parsed.attachments)){
+        atts = parsed.attachments;
+      }
+    } catch(e){}
   }
-  /* 2. 프로젝트명(name) 기준 조회 (구글 시트 ID 변경 또는 신규 생성 시 보완) */
-  if ((!arr || !arr.length) && p.name){
-    var s2 = localStorage.getItem("appleseed_atts_name_" + String(p.name).trim());
-    if (s2){ try { arr = JSON.parse(s2); } catch(e){} }
-  }
-  /* 3. p.attachments 객체 자체 보존 조회 */
-  if (!arr || !arr.length){
-    if (Array.isArray(p.attachments) && p.attachments.length > 0) arr = p.attachments;
+  
+  if (!atts.length){
+    if (Array.isArray(p.attachments) && p.attachments.length > 0) atts = p.attachments;
     else if (typeof p.attachments === "string" && p.attachments.trim()){
-      try { arr = JSON.parse(p.attachments); } catch(e){}
+      try { atts = JSON.parse(p.attachments); } catch(e){}
     }
   }
-  return Array.isArray(arr) ? arr : [];
+  
+  if (!atts.length && p.id != null){
+    var s1 = localStorage.getItem("appleseed_atts_id_" + p.id) || localStorage.getItem("appleseed_atts_" + p.id);
+    if (s1){ try { atts = JSON.parse(s1); } catch(e){} }
+  }
+  if (!atts.length && p.name != null){
+    var s2 = localStorage.getItem("appleseed_atts_name_" + String(p.name).trim());
+    if (s2){ try { atts = JSON.parse(s2); } catch(e){} }
+  }
+  
+  return { nextAction: cleanAction, attachments: Array.isArray(atts) ? atts : [] };
+}
+
+function getProjectAttachments(p){
+  return extractAttachmentsFromProject(p).attachments;
 }
 
 function saveProjectAttachments(projectId, attsArr, projectName){
@@ -1013,15 +1031,24 @@ function saveProjectAttachments(projectId, attsArr, projectName){
     localStorage.setItem("appleseed_atts_name_" + String(projectName).trim(), jsonStr);
   }
   
+  var targetP = null;
   if (state.data && state.data.projects){
     state.data.projects.forEach(function(p){
       if ((projectId && String(p.id) === String(projectId)) || (projectName && p.name === projectName)){
         p.attachments = cleanArr;
+        targetP = p;
       }
     });
   }
+  
+  var currentAction = targetP ? (targetP.next_action || "") : "";
+  var cleanText = currentAction.replace(/\[ATTS:.*?\]/g, "").trim();
+  var newNextActionStr = (cleanText ? cleanText + " " : "") + "[ATTS:" + JSON.stringify({ attachments: cleanArr }) + "]";
+  
+  if (targetP) targetP.next_action = newNextActionStr;
+  
   if (projectId != null){
-    crud("PATCH", "projects", projectId, { attachments: cleanArr });
+    crud("PATCH", "projects", projectId, { next_action: newNextActionStr, attachments: cleanArr });
   }
 }
 
@@ -1038,7 +1065,7 @@ async function loadData(){
   state.data = applyTombstones(j);
   if (state.data && state.data.projects){
     state.data.projects.forEach(function(p){
-      p.attachments = getProjectAttachments(p);
+      p.attachments = extractAttachmentsFromProject(p).attachments;
     });
   }
   state.loading = false;
@@ -2611,13 +2638,16 @@ function mountProjectWorkspace(container){
       "<div class='proj-d-actions'><button class='btn sm' data-p-edit>수정</button>"+
         "<button class='btn sm ghost danger' data-p-del>삭제</button></div></div>";
 
+    var ext = extractAttachmentsFromProject(p);
+    var cleanNextAction = ext.nextAction;
+
     html += "<section class='proj-card'><div class='proj-card-h'>개요</div><div class='proj-fields'>"+
       pField("고객", esc(p.client||"—"))+
       pField("유형", p.type?("<span class='tag "+cls+"'>"+esc(p.type)+"</span>"):"—")+
       pField("기간", "<span class='tnum'>"+esc(period)+"</span>")+
       pField("계약금액", "<span class='tnum'>"+moneyMan(p.contract_amount)+"</span>")+
       pField("진행률", "<div class='pf-prog'><div class='prog'><i class='"+(pct===0?"zero":cls)+"' style='width:"+Math.max(pct,2)+"%'></i></div><span class='pct tnum'>"+pct+"%</span></div>", true)+
-      pField("다음 액션", esc(p.next_action||"—"), true)+
+      pField("다음 액션", esc(cleanNextAction||"—"), true)+
       "</div></section>";
 
     /* 프로젝트 첨부파일 & 구글드라이브 자료 카드리스트 */
