@@ -1527,9 +1527,10 @@ function openForm(table, row, defaults){
     } else if (type==="attachments"){
       body += "<div class='fld'><label>"+esc(label)+"</label>"+
         "<div class='att-form-box' id='f_attachments_box'>"+
-          "<div style='display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;'>"+
-            "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener'>📁 구글드라이브 (애플시드관리시스템/프로젝트관리) ↗</a>"+
-            "<span style='font-size:11.5px; color:var(--ink-3);'>PDF, 이미지, 링크 등록</span>"+
+          "<div style='background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px; padding:10px 12px; margin-bottom:10px;'>"+
+            "<div style='font-size:12.5px; font-weight:600; color:var(--emerald-light); margin-bottom:4px;'>📁 구글드라이브 프로젝트관리 공유폴더</div>"+
+            "<div style='font-size:11.5px; color:var(--ink-2); margin-bottom:8px;'>구글드라이브 (내 드라이브 > 애플시드관리시스템 > 프로젝트관리)에 파일 저장을 원하시면 아래 버튼으로 폴더를 여신 후 파일을 놓으세요.</div>"+
+            "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener' style='display:inline-block; padding:5px 12px; background:var(--emerald); color:#fff; font-size:12px; font-weight:600; border-radius:6px; text-decoration:none;'>📁 구글드라이브 공유폴더 바로가기 ↗</a>"+
           "</div>"+
           "<div class='att-drop-hint'>📥 여기에 파일(PDF/이미지/문서)을 끌어다 놓으세요</div>"+
           "<div class='att-form-actions'>"+
@@ -2809,8 +2810,11 @@ function openQuickAttachmentDialog(p){
   var curAtts = getProjectAttachments(p);
   var bg = el("<div class='modal-bg'><div class='modal'><div class='modal-h'><h3>📁 프로젝트 첨부자료 · "+esc(p.name||"")+"</h3><button class='icon-btn' id='qClose'>✕</button></div>"+
     "<div class='modal-b'>"+
-      "<div class='fld'><label>구글드라이브 저장소</label>"+
-        "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener'>📁 구글드라이브 (애플시드관리시스템/프로젝트관리) 바로가기 ↗</a>"+
+      "<div class='fld'><label>구글드라이브 프로젝트관리 공유폴더</label>"+
+        "<div style='background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px; padding:10px 12px; margin-bottom:10px;'>"+
+          "<div style='font-size:11.5px; color:var(--ink-2); margin-bottom:8px;'>구글드라이브(내 드라이브 > 애플시드관리시스템 > 프로젝트관리)에도 파일을 저장하시려면 아래 버튼으로 공유폴더를 연 후 드래그하세요.</div>"+
+          "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener' style='display:inline-block; padding:6px 14px; background:var(--emerald); color:#fff; font-weight:600; border-radius:6px; text-decoration:none;'>📁 구글드라이브 공유폴더 바로가기 ↗</a>"+
+        "</div>"+
       "</div>"+
       "<div class='fld'><label>첨부파일 / 링크 추가 (PDF, 이미지, 외부링크)</label>"+
         "<div class='att-form-box' id='qAttFormBox'>"+
