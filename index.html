@@ -1445,23 +1445,46 @@ async function addFilesToAtts(files, attArray, callback){
       var gId = null;
       
       try {
-        var gResPromise = apiSend("POST", null, {
-          action: "uploadDrive",
-          folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
-          fileName: f.name,
-          mimeType: f.type || "application/octet-stream",
-          fileData: pureBase64
-        });
+        var chunkSize = 2 * 1024 * 1024;
+        var totalChunks = Math.ceil(pureBase64.length / chunkSize);
         
-        var timeoutPromise = new Promise(function(resolve){
-          setTimeout(function(){ resolve(null); }, 12000);
-        });
-        
-        var gRes = await Promise.race([gResPromise, timeoutPromise]);
-        
-        if (gRes && gRes.ok && (gRes.fileUrl || gRes.downloadUrl)){
-          finalUrl = gRes.downloadUrl || gRes.fileUrl;
-          gId = gRes.fileId;
+        if (totalChunks <= 1){
+          var gResPromise = apiSend("POST", null, {
+            action: "uploadDrive",
+            folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
+            fileName: f.name,
+            mimeType: f.type || "application/octet-stream",
+            fileData: pureBase64
+          });
+          var timeoutPromise = new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 15000); });
+          var gRes = await Promise.race([gResPromise, timeoutPromise]);
+          if (gRes && gRes.ok && (gRes.fileUrl || gRes.downloadUrl)){
+            finalUrl = gRes.downloadUrl || gRes.fileUrl;
+            gId = gRes.fileId;
+          }
+        } else {
+          var uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).substr(2,6);
+          var lastRes = null;
+          for (var cIdx = 0; cIdx < totalChunks; cIdx++){
+            var chunkData = pureBase64.substr(cIdx * chunkSize, chunkSize);
+            showUploadToast("대용량 구글드라이브 업로드 중... (" + (cIdx + 1) + "/" + totalChunks + " 조각) " + f.name, false);
+            var cPromise = apiSend("POST", null, {
+              action: "uploadChunk",
+              uploadId: uploadId,
+              chunkIndex: cIdx,
+              totalChunks: totalChunks,
+              folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
+              fileName: f.name,
+              mimeType: f.type || "application/octet-stream",
+              chunkData: chunkData
+            });
+            var cTimeout = new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 20000); });
+            lastRes = await Promise.race([cPromise, cTimeout]);
+          }
+          if (lastRes && lastRes.ok && (lastRes.fileUrl || lastRes.downloadUrl)){
+            finalUrl = lastRes.downloadUrl || lastRes.fileUrl;
+            gId = lastRes.fileId;
+          }
         }
       } catch(apiErr){ console.warn("Google Drive upload warning:", apiErr); }
       
