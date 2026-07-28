@@ -606,6 +606,50 @@
   .proj-subs-card .ps-empty{font-size:13px; color:var(--ink-3);}
   .proj-subs-card .ps-soon{margin-top:8px; font-size:11.5px; font-weight:700; color:var(--urgent);
     background:var(--urgent-soft,rgba(220,80,60,.12)); border-radius:7px; padding:5px 8px; display:inline-block;}
+
+  /* ===== 프로젝트 첨부파일 & 구글드라이브 ===== */
+  .gdrive-link-btn{
+    display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:8px;
+    background:var(--surface-3); border:1px solid var(--line-strong); color:var(--accent-ink);
+    font-size:12px; font-weight:700; text-decoration:none; transition:all .15s;
+  }
+  .gdrive-link-btn:hover{background:var(--accent-soft); border-color:var(--accent); color:var(--ink);}
+  
+  .att-form-box{
+    border:1px solid var(--line-strong); background:var(--surface-2); border-radius:10px;
+    padding:12px; display:flex; flex-direction:column; gap:10px;
+  }
+  .att-form-actions{display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+  .att-list-items{display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto;}
+  .att-item-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:8px 10px; background:var(--surface); border:1px solid var(--line); border-radius:8px; font-size:12.5px;
+  }
+  .att-item-main{display:flex; align-items:center; gap:8px; min-width:0; flex:1;}
+  .att-badge{
+    font-size:10px; font-weight:800; padding:2px 6px; border-radius:5px; flex:none; text-transform:uppercase;
+  }
+  .att-badge.pdf{background:#ef4444; color:#fff;}
+  .att-badge.image{background:#3b82f6; color:#fff;}
+  .att-badge.link{background:#10b981; color:#fff;}
+  .att-badge.file{background:#8b5cf6; color:#fff;}
+  .att-item-name{font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .att-item-meta{font-size:11px; color:var(--ink-3); flex:none;}
+  .att-item-del{color:var(--ink-3); cursor:pointer; font-size:14px; border:none; background:transparent; padding:2px 6px;}
+  .att-item-del:hover{color:var(--urgent);}
+
+  .att-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:12px; padding:14px 16px;}
+  .att-card{
+    background:var(--surface-2); border:1px solid var(--line); border-radius:10px;
+    padding:12px; display:flex; flex-direction:column; gap:8px; transition:border-color .15s; position:relative;
+  }
+  .att-card:hover{border-color:var(--accent);}
+  .att-card-head{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+  .att-card-title{font-size:13px; font-weight:700; color:var(--ink); word-break:break-all; line-height:1.35;}
+  .att-thumb{width:100%; height:120px; object-fit:cover; border-radius:6px; border:1px solid var(--line); cursor:pointer;}
+  .att-card-foot{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:auto; padding-top:6px; border-top:1px solid var(--line); font-size:11.5px;}
+  .att-card-actions{display:flex; gap:6px; align-items:center;}
+  .att-card-actions .btn-att{font-size:11px; padding:3px 8px; border-radius:6px; font-weight:700; text-decoration:none; display:inline-flex; align-items:center; gap:3px;}
   .proj-cards{max-height:calc(100vh - 232px); overflow-y:auto; padding:8px;}
   .proj-cards::-webkit-scrollbar{width:8px;}
   .proj-cards::-webkit-scrollbar-thumb{background:var(--line-strong); border-radius:8px;}
@@ -1092,6 +1136,19 @@ function pageHead(route, desc, actions){
 }
 
 /* ============ 폼 모달 ============ */
+function getAttType(fileName, mimeType){
+  var fn = String(fileName||"").toLowerCase();
+  if (/\.(jpg|jpeg|png|gif|webp|svg)$/.test(fn) || (mimeType&&mimeType.indexOf("image")===0)) return "image";
+  if (/\.pdf$/.test(fn) || mimeType==="application/pdf") return "pdf";
+  if (/^https?:\/\//.test(fileName)) return "link";
+  return "file";
+}
+function formatBytes(bytes){
+  if (!bytes || bytes===0) return "0 B";
+  var k=1024, sizes=["B","KB","MB","GB"], i=Math.floor(Math.log(bytes)/Math.log(k));
+  return parseFloat((bytes/Math.pow(k,i)).toFixed(1)) + " " + sizes[i];
+}
+
 var FIELDS = {
   revenue: [ ["date","입금/발생일","date"], ["client","고객사","text"], ["item","항목","text"], ["amount","금액(원)","number"],
     ["status","상태","select",["입금대기","입금완료"]],
@@ -1101,7 +1158,8 @@ var FIELDS = {
     ["category","분류","text"], ["memo","메모","text"] ],
   projects: [ ["name","프로젝트명","text"], ["client","고객사","text"], ["type","유형","select",["VFX","AI VFX","AI콘텐츠","AI교육"]],
     ["status","상태","select",["제안중","진행중","완료","보류"]], ["start_date","시작일","date"], ["end_date","종료예정","date"],
-    ["contract_amount","계약금액(원)","number"], ["progress","진행률(0~100)","number"], ["next_action","다음 액션","text"] ],
+    ["contract_amount","계약금액(원)","number"], ["progress","진행률(0~100)","number"], ["next_action","다음 액션","text"],
+    ["attachments","첨부파일 / 구글드라이브 자료","attachments"] ],
   actions: [ ["title","제목","text"], ["owner","담당","text"], ["due","기한","date"], ["source","출처","text"], ["done","완료","checkbox"] ],
   calendar: [ ["event_date","날짜","date"], ["start_time","시작 시간","time"], ["end_time","종료 시간","time"], ["title","제목","text"], ["all_day","종일","checkbox"] ],
   meetings: [ ["meeting_date","회의일","date"], ["title","제목","text"], ["summary","요약","textarea"] ],
@@ -1123,6 +1181,8 @@ var BOOLS = { done:1, all_day:1 };
 function openForm(table, row, defaults){
   var fields = FIELDS[table]; var editing = !!row;
   var body = "";
+  var currentAtts = (row && row.attachments) ? (Array.isArray(row.attachments) ? row.attachments.slice() : (typeof row.attachments==='string' ? JSON.parse(row.attachments||"[]") : [])) : [];
+  
   fields.forEach(function(f){
     var name=f[0], label=f[1], type=f[2], opts=f[3];
     var val = (row && row[name]!=null) ? row[name] : (defaults && defaults[name]!=null ? defaults[name] : "");
@@ -1133,6 +1193,20 @@ function openForm(table, row, defaults){
       body += "<div class='fld'><label>"+esc(label)+"</label><select id='f_"+name+"'>"+o+"</select></div>";
     } else if (type==="textarea"){
       body += "<div class='fld'><label>"+esc(label)+"</label><textarea id='f_"+name+"'>"+esc(val)+"</textarea></div>";
+    } else if (type==="attachments"){
+      body += "<div class='fld'><label>"+esc(label)+"</label>"+
+        "<div class='att-form-box' id='f_attachments_box'>"+
+          "<div style='display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;'>"+
+            "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/my-drive' target='_blank' rel='noopener'>📁 구글드라이브 (애플시드관리시스템/프로젝트관리) ↗</a>"+
+            "<span style='font-size:11.5px; color:var(--ink-3);'>PDF, 이미지, 링크 등록</span>"+
+          "</div>"+
+          "<div class='att-form-actions'>"+
+            "<button type='button' class='btn sm primary' id='mAttBtnFile'>📁 파일 선택 (PDF/이미지/문서)</button>"+
+            "<button type='button' class='btn sm ghost' id='mAttBtnLink'>🔗 링크/Drive URL 추가</button>"+
+            "<input type='file' id='mAttFileInput' multiple accept='image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip' style='display:none'>"+
+          "</div>"+
+          "<div class='att-list-items' id='mAttItemsList'></div>"+
+        "</div></div>";
     } else if (type==="time"){
       /* 브라우저 기본 시간선택기가 10분 단위(step)를 무시 → 자체 드롭다운 (오전/오후 · 1~12시 · 10분 단위) */
       var tv = String(val||"").slice(0,5), tap="오전", th="", tmin="";
@@ -1157,6 +1231,89 @@ function openForm(table, row, defaults){
   });
   var bg = el("<div class='modal-bg'><div class='modal'><div class='modal-h'><h3>"+(editing?"수정":"추가")+" · "+esc(TITLES[routeForTable(table)]||table)+"</h3><button class='icon-btn' id='mClose'>✕</button></div><div class='modal-b'>"+body+"</div><div class='modal-f'><button class='btn ghost' id='mCancel'>취소</button><button class='btn primary' id='mSave'>저장</button></div></div></div>");
   document.body.appendChild(bg);
+
+  /* 첨부파일 모달 이벤터 연동 */
+  var attFileInput = bg.querySelector("#mAttFileInput");
+  var attItemsList = bg.querySelector("#mAttItemsList");
+  var attBtnFile = bg.querySelector("#mAttBtnFile");
+  var attBtnLink = bg.querySelector("#mAttBtnLink");
+
+  function renderModalAtts(){
+    if (!attItemsList) return;
+    if (!currentAtts.length){
+      attItemsList.innerHTML = "<div style='font-size:12px; color:var(--ink-3); padding:8px 0; text-align:center;'>등록된 첨부파일이나 링크가 없습니다.</div>";
+      return;
+    }
+    var h = "";
+    currentAtts.forEach(function(item, idx){
+      var badge = (item.type||"file").toLowerCase();
+      var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "link" ? "링크" : "파일";
+      h += "<div class='att-item-row'>"+
+        "<div class='att-item-main'>"+
+          "<span class='att-badge "+badge+"'>"+bLabel+"</span>"+
+          "<span class='att-item-name'>"+esc(item.name||"")+"</span>"+
+        "</div>"+
+        "<span class='att-item-meta'>"+esc(item.size||"")+"</span>"+
+        "<button type='button' class='att-item-del' data-att-del='"+idx+"'>🗑</button>"+
+      "</div>";
+    });
+    attItemsList.innerHTML = h;
+    attItemsList.querySelectorAll("[data-att-del]").forEach(function(b){
+      b.onclick = function(){
+        var i = parseInt(b.getAttribute("data-att-del"), 10);
+        currentAtts.splice(i, 1);
+        renderModalAtts();
+      };
+    });
+  }
+
+  if (attBtnFile && attFileInput){
+    attBtnFile.onclick = function(){ attFileInput.click(); };
+    attFileInput.onchange = function(){
+      var files = Array.from(attFileInput.files||[]);
+      if (!files.length) return;
+      var nowStr = seoulNow().toISOString().slice(0,10);
+      files.forEach(function(f){
+        var reader = new FileReader();
+        reader.onload = function(e){
+          var t = getAttType(f.name, f.type);
+          currentAtts.push({
+            id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+            name: f.name,
+            type: t,
+            url: e.target.result,
+            size: formatBytes(f.size),
+            date: nowStr
+          });
+          renderModalAtts();
+        };
+        reader.readAsDataURL(f);
+      });
+      attFileInput.value = "";
+    };
+  }
+
+  if (attBtnLink){
+    attBtnLink.onclick = function(){
+      var u = prompt("연결할 링크 또는 구글드라이브 URL을 입력하세요:");
+      if (!u || !u.trim()) return;
+      u = u.trim();
+      var title = prompt("링크 제목/설명을 입력하세요 (선택):", u) || u;
+      var nowStr = seoulNow().toISOString().slice(0,10);
+      currentAtts.push({
+        id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+        name: title.trim(),
+        type: 'link',
+        url: u,
+        size: '링크',
+        date: nowStr
+      });
+      renderModalAtts();
+    };
+  }
+
+  renderModalAtts();
+
   function close(){ bg.remove(); }
   bg.querySelector("#mClose").onclick = close;
   bg.querySelector("#mCancel").onclick = close;
@@ -1167,21 +1324,27 @@ function openForm(table, row, defaults){
   bg.querySelector("#mSave").onclick = async function(){
     var obj = {};
     fields.forEach(function(f){
-      var name=f[0], type=f[2]; var inp = bg.querySelector("#f_"+name);
-      if (type==="checkbox") obj[name] = inp.checked;
-      else if (type==="time"){
-        /* 자체 드롭다운 → "HH:mm" 24시간제로 변환 (시 미선택이면 빈 값) */
-        var hv = inp.querySelector("[data-h]").value;
-        if (!hv) obj[name] = "";
-        else {
-          var ap = inp.querySelector("[data-ap]").value;
-          var mv = inp.querySelector("[data-m]").value || "00";
-          var h24 = parseInt(hv,10) % 12; if (ap === "오후") h24 += 12;
-          obj[name] = (h24 < 10 ? "0" : "") + h24 + ":" + mv;
+      var name=f[0], type=f[2];
+      if (type === "attachments"){
+        obj[name] = currentAtts;
+      } else {
+        var inp = bg.querySelector("#f_"+name);
+        if (!inp) return;
+        if (type==="checkbox") obj[name] = inp.checked;
+        else if (type==="time"){
+          /* 자체 드롭다운 → "HH:mm" 24시간제로 변환 (시 미선택이면 빈 값) */
+          var hv = inp.querySelector("[data-h]").value;
+          if (!hv) obj[name] = "";
+          else {
+            var ap = inp.querySelector("[data-ap]").value;
+            var mv = inp.querySelector("[data-m]").value || "00";
+            var h24 = parseInt(hv,10) % 12; if (ap === "오후") h24 += 12;
+            obj[name] = (h24 < 10 ? "0" : "") + h24 + ":" + mv;
+          }
         }
+        else if (NUMS[name]) obj[name] = inp.value===""? null : Number(inp.value);
+        else obj[name] = inp.value;
       }
-      else if (NUMS[name]) obj[name] = inp.value===""? null : Number(inp.value);
-      else obj[name] = inp.value;
     });
     close();
     if (editing) await crud("PATCH", table, row.id, obj);
@@ -2067,6 +2230,43 @@ function mountProjectWorkspace(container){
       pField("다음 액션", esc(p.next_action||"—"), true)+
       "</div></section>";
 
+    /* 프로젝트 첨부파일 & 구글드라이브 자료 카드리스트 */
+    var atts = Array.isArray(p.attachments) ? p.attachments : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
+    html += "<section class='proj-card'><div class='proj-card-h'>📁 첨부파일 & 구글드라이브 자료"+
+      "<span class='pc-sub'>PDF · 이미지 · Drive</span>"+
+      "<a class='gdrive-link-btn' style='margin-left:auto; margin-bottom:0;' href='https://drive.google.com/drive/u/0/my-drive' target='_blank' rel='noopener'>📁 구글드라이브 ↗</a>"+
+      "<button class='btn sm ghost proj-mini-add' data-add-att>+ 첨부 추가</button></div>";
+    
+    if (!atts.length){
+      html += "<div class='proj-sub-empty'>등록된 첨부파일이나 구글드라이브 링크가 없습니다.<br>"+
+        "<button class='btn sm primary' style='margin-top:10px' data-add-att>+ 파일 / 링크 추가하기</button></div>";
+    } else {
+      html += "<div class='att-grid'>";
+      atts.forEach(function(att, aIdx){
+        var badge = (att.type||"file").toLowerCase();
+        var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "link" ? "링크" : "파일";
+        var isImg = badge === "image" && att.url && att.url.indexOf("data:image")===0;
+        
+        html += "<div class='att-card'>"+
+          "<div class='att-card-head'>"+
+            "<span class='att-badge "+badge+"'>"+bLabel+"</span>"+
+            "<span class='att-item-meta tnum'>"+esc(att.date||"")+"</span>"+
+          "</div>"+
+          "<div class='att-card-title'>"+esc(att.name||"")+"</div>"+
+          (isImg ? "<img src='"+att.url+"' class='att-thumb' data-preview-img='"+aIdx+"' title='클릭하여 이미지 보기'>" : "")+
+          "<div class='att-card-foot'>"+
+            "<span class='att-item-meta tnum'>"+esc(att.size||"")+"</span>"+
+            "<div class='att-card-actions'>"+
+              (att.url ? "<a href='"+att.url+"' target='_blank' rel='noopener' class='btn-att btn primary sm'>"+(badge==='link'?'↗ 링크':'👁️ 보기')+"</a>" : "")+
+              "<button class='icon-btn del' data-att-del-proj='"+aIdx+"'>🗑</button>"+
+            "</div>"+
+          "</div>"+
+        "</div>";
+      });
+      html += "</div>";
+    }
+    html += "</section>";
+
     var memoPrefix = "["+pname+"]";
     var memos = (d.memos||[]).filter(function(m){ return String(m.title||"").indexOf(memoPrefix)===0; });
     html += "<section class='proj-card'><div class='proj-card-h'>메모<button class='btn sm ghost proj-mini-add' data-add-memo>+ 메모</button></div>";
@@ -2115,6 +2315,21 @@ function mountProjectWorkspace(container){
     detailEl.innerHTML = html;
     detailEl.querySelector("[data-p-edit]").onclick = function(){ openForm("projects", p); };
     detailEl.querySelector("[data-p-del]").onclick = function(){ delRow("projects", p.id); };
+
+    /* 첨부자료 이벤트 연동 */
+    detailEl.querySelectorAll("[data-add-att]").forEach(function(b){
+      b.onclick = function(){ openQuickAttachmentDialog(p); };
+    });
+    detailEl.querySelectorAll("[data-att-del-proj]").forEach(function(b){
+      b.onclick = async function(){
+        var aIdx = parseInt(b.getAttribute("data-att-del-proj"), 10);
+        var ok = await confirmDlg("이 첨부자료를 삭제할까요?", "삭제", "첨부자료 삭제");
+        if (!ok) return;
+        var curAtts = Array.isArray(p.attachments) ? p.attachments.slice() : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
+        curAtts.splice(aIdx, 1);
+        crud("PATCH", "projects", p.id, { attachments: curAtts });
+      };
+    });
     var am = detailEl.querySelector("[data-add-memo]"); if(am) am.onclick=function(){ openForm("memos", null, {title:"["+pname+"] "}); };
     var at = detailEl.querySelector("[data-add-todo]"); if(at) at.onclick=function(){ openForm("actions", null, {source:pname}); };
     var ar = detailEl.querySelector("[data-add-rev]"); if(ar) ar.onclick=function(){ openForm("revenue", null, {project:pname}); };
@@ -2197,6 +2412,113 @@ function mountProjectWorkspace(container){
   root.querySelectorAll("[data-proj-filter]").forEach(function(c){ c.onclick = function(){ projFilter = c.getAttribute("data-proj-filter"); drawList(); }; });
 
   drawList(); drawDetail(); drawRail(); drawSubs();
+}
+
+function openQuickAttachmentDialog(p){
+  var curAtts = Array.isArray(p.attachments) ? p.attachments.slice() : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
+  var bg = el("<div class='modal-bg'><div class='modal'><div class='modal-h'><h3>📁 프로젝트 첨부자료 · "+esc(p.name||"")+"</h3><button class='icon-btn' id='qClose'>✕</button></div>"+
+    "<div class='modal-b'>"+
+      "<div class='fld'><label>구글드라이브 저장소</label>"+
+        "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/my-drive' target='_blank' rel='noopener'>📁 구글드라이브 (애플시드관리시스템/프로젝트관리) 바로가기 ↗</a>"+
+      "</div>"+
+      "<div class='fld'><label>첨부파일 / 링크 추가 (PDF, 이미지, 외부링크)</label>"+
+        "<div class='att-form-box'>"+
+          "<div class='att-form-actions'>"+
+            "<button type='button' class='btn sm primary' id='qAttBtnFile'>📁 파일 선택 (PDF/이미지/문서)</button>"+
+            "<button type='button' class='btn sm ghost' id='qAttBtnLink'>🔗 링크 / Drive URL 추가</button>"+
+            "<input type='file' id='qFileInput' multiple accept='image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip' style='display:none'>"+
+          "</div>"+
+          "<div class='att-list-items' id='qAttList'></div>"+
+        "</div>"+
+      "</div>"+
+    "</div>"+
+    "<div class='modal-f'><button class='btn ghost' id='qCancel'>취소</button><button class='btn primary' id='qSave'>저장</button></div></div></div>");
+  
+  document.body.appendChild(bg);
+  function close(){ bg.remove(); }
+  bg.querySelector("#qClose").onclick = close;
+  bg.querySelector("#qCancel").onclick = close;
+  
+  var qList = bg.querySelector("#qAttList");
+  var qFileInput = bg.querySelector("#qFileInput");
+  var qBtnFile = bg.querySelector("#qAttBtnFile");
+  var qBtnLink = bg.querySelector("#qAttBtnLink");
+
+  function renderQList(){
+    if (!curAtts.length){
+      qList.innerHTML = "<div style='font-size:12px; color:var(--ink-3); text-align:center; padding:8px;'>등록된 첨부자료가 없습니다.</div>";
+      return;
+    }
+    var h = "";
+    curAtts.forEach(function(item, idx){
+      var badge = (item.type||"file").toLowerCase();
+      var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "link" ? "링크" : "파일";
+      h += "<div class='att-item-row'>"+
+        "<div class='att-item-main'>"+
+          "<span class='att-badge "+badge+"'>"+bLabel+"</span>"+
+          "<span class='att-item-name'>"+esc(item.name||"")+"</span>"+
+        "</div>"+
+        "<span class='att-item-meta'>"+esc(item.size||"")+"</span>"+
+        "<button type='button' class='att-item-del' data-qdel='"+idx+"'>🗑</button>"+
+      "</div>";
+    });
+    qList.innerHTML = h;
+    qList.querySelectorAll("[data-qdel]").forEach(function(b){
+      b.onclick = function(){
+        var i = parseInt(b.getAttribute("data-qdel"), 10);
+        curAtts.splice(i, 1);
+        renderQList();
+      };
+    });
+  }
+
+  qBtnFile.onclick = function(){ qFileInput.click(); };
+  qFileInput.onchange = function(){
+    var files = Array.from(qFileInput.files||[]);
+    if (!files.length) return;
+    var nowStr = seoulNow().toISOString().slice(0,10);
+    files.forEach(function(f){
+      var reader = new FileReader();
+      reader.onload = function(e){
+        var t = getAttType(f.name, f.type);
+        curAtts.push({
+          id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+          name: f.name,
+          type: t,
+          url: e.target.result,
+          size: formatBytes(f.size),
+          date: nowStr
+        });
+        renderQList();
+      };
+      reader.readAsDataURL(f);
+    });
+    qFileInput.value = "";
+  };
+
+  qBtnLink.onclick = function(){
+    var u = prompt("연결할 링크 또는 구글드라이브 URL을 입력하세요:");
+    if (!u || !u.trim()) return;
+    u = u.trim();
+    var title = prompt("링크 제목/설명을 입력하세요 (선택):", u) || u;
+    var nowStr = seoulNow().toISOString().slice(0,10);
+    curAtts.push({
+      id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+      name: title.trim(),
+      type: 'link',
+      url: u,
+      size: '링크',
+      date: nowStr
+    });
+    renderQList();
+  };
+
+  renderQList();
+
+  bg.querySelector("#qSave").onclick = async function(){
+    close();
+    await crud("PATCH", "projects", p.id, { attachments: curAtts });
+  };
 }
 
 /* ---- 매출관리 ---- */
