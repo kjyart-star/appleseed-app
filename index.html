@@ -1423,7 +1423,6 @@ async function openAttachmentPreview(att){
       "<div class='modal-h' style='flex-shrink:0;'>"+
         "<h3>👁️ "+esc(att.name||"첨부파일 미리보기")+"</h3>"+
         "<div style='display:flex; gap:6px; align-items:center; flex-wrap:wrap;'>"+
-          "<a class='btn sm ghost' href='"+gdriveFolderUrl+"' target='_blank' rel='noopener' title='구글드라이브 프로젝트관리 폴더 바로가기'>☁️ 구글드라이브 공유폴더 ↗</a>"+
           "<button type='button' class='btn sm ghost' id='pSizeToggleBtn' title='전체화면 / 창 크기 조절'>🔲 전체화면</button>"+
           "<button type='button' class='btn sm primary' id='pDlBtn'>💾 다운로드</button>"+
           "<button type='button' class='icon-btn' id='pClose'>✕</button>"+
@@ -1545,15 +1544,10 @@ function openForm(table, row, defaults){
     } else if (type==="attachments"){
       body += "<div class='fld'><label>"+esc(label)+"</label>"+
         "<div class='att-form-box' id='f_attachments_box'>"+
-          "<div style='background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px; padding:10px 12px; margin-bottom:10px;'>"+
-            "<div style='font-size:12.5px; font-weight:600; color:var(--emerald-light); margin-bottom:4px;'>📁 구글드라이브 프로젝트관리 공유폴더</div>"+
-            "<div style='font-size:11.5px; color:var(--ink-2); margin-bottom:8px;'>구글드라이브 (내 드라이브 > 애플시드관리시스템 > 프로젝트관리)에 파일 저장을 원하시면 아래 버튼으로 폴더를 여신 후 파일을 놓으세요.</div>"+
-            "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener' style='display:inline-block; padding:5px 12px; background:var(--emerald); color:#fff; font-size:12px; font-weight:600; border-radius:6px; text-decoration:none;'>📁 구글드라이브 공유폴더 바로가기 ↗</a>"+
-          "</div>"+
           "<div class='att-drop-hint'>📥 여기에 파일(PDF/이미지/문서)을 끌어다 놓으세요</div>"+
           "<div class='att-form-actions'>"+
             "<button type='button' class='btn sm primary' id='mAttBtnFile'>📁 파일 선택 (PDF/이미지/문서)</button>"+
-            "<button type='button' class='btn sm ghost' id='mAttBtnLink'>🔗 링크/Drive URL 추가</button>"+
+            "<button type='button' class='btn sm ghost' id='mAttBtnLink'>🔗 링크 URL 추가</button>"+
             "<input type='file' id='mAttFileInput' multiple accept='image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip' style='display:none'>"+
           "</div>"+
           "<div class='att-list-items' id='mAttItemsList'></div>"+
@@ -2604,12 +2598,11 @@ function mountProjectWorkspace(container){
       pField("다음 액션", esc(cleanNextAction||"—"), true)+
       "</div></section>";
 
-    /* 프로젝트 첨부파일 & 구글드라이브 자료 카드리스트 */
+    /* 프로젝트 첨부파일 카드리스트 */
     var atts = getProjectAttachments(p);
     html += "<section class='proj-card' id='proj_att_card'><div class='proj-card-h'>📁 프로젝트 첨부자료실"+
-      "<span class='pc-sub'>PDF · 이미지 · Drive</span>"+
+      "<span class='pc-sub'>PDF · 이미지 · 문서</span>"+
       "<div style='margin-left:auto; display:flex; gap:6px; align-items:center;'>"+
-        "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener'>📁 구글드라이브 ↗</a>"+
         "<button class='btn sm primary' id='cardBtnFile'>📁 파일 추가</button>"+
         "<button class='btn sm ghost' id='cardBtnLink'>🔗 링크 추가</button>"+
         "<input type='file' id='cardFileInput' multiple accept='image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip' style='display:none'>"+
@@ -2617,7 +2610,7 @@ function mountProjectWorkspace(container){
       "<div class='att-drop-hint' id='cardDropHint' style='margin:10px 16px 0; cursor:pointer;'>📥 여기에 파일(PDF/이미지/문서)을 끌어다 놓으세요</div>";
     
     if (!atts.length){
-      html += "<div class='proj-sub-empty'>등록된 첨부파일이나 구글드라이브 링크가 없습니다.<br>"+
+      html += "<div class='proj-sub-empty'>등록된 첨부자료가 없습니다.<br>"+
         "<button class='btn sm primary' style='margin-top:10px' data-add-att>+ 파일 / 링크 추가하기</button></div>";
     } else {
       html += "<div class='att-grid'>";
@@ -2869,18 +2862,12 @@ function openQuickAttachmentDialog(p){
   var curAtts = getProjectAttachments(p);
   var bg = el("<div class='modal-bg'><div class='modal'><div class='modal-h'><h3>📁 프로젝트 첨부자료 · "+esc(p.name||"")+"</h3><button class='icon-btn' id='qClose'>✕</button></div>"+
     "<div class='modal-b'>"+
-      "<div class='fld'><label>구글드라이브 프로젝트관리 공유폴더</label>"+
-        "<div style='background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px; padding:10px 12px; margin-bottom:10px;'>"+
-          "<div style='font-size:11.5px; color:var(--ink-2); margin-bottom:8px;'>구글드라이브(내 드라이브 > 애플시드관리시스템 > 프로젝트관리)에도 파일을 저장하시려면 아래 버튼으로 공유폴더를 연 후 드래그하세요.</div>"+
-          "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener' style='display:inline-block; padding:6px 14px; background:var(--emerald); color:#fff; font-weight:600; border-radius:6px; text-decoration:none;'>📁 구글드라이브 공유폴더 바로가기 ↗</a>"+
-        "</div>"+
-      "</div>"+
-      "<div class='fld'><label>첨부파일 / 링크 추가 (PDF, 이미지, 외부링크)</label>"+
+      "<div class='fld'><label>첨부파일 / 링크 추가 (PDF, 이미지, 문서, 외부링크)</label>"+
         "<div class='att-form-box' id='qAttFormBox'>"+
           "<div class='att-drop-hint'>📥 여기에 파일(PDF/이미지/문서)을 끌어다 놓으세요</div>"+
           "<div class='att-form-actions'>"+
             "<button type='button' class='btn sm primary' id='qAttBtnFile'>📁 파일 선택 (PDF/이미지/문서)</button>"+
-            "<button type='button' class='btn sm ghost' id='qAttBtnLink'>🔗 링크 / Drive URL 추가</button>"+
+            "<button type='button' class='btn sm ghost' id='qAttBtnLink'>🔗 링크 URL 추가</button>"+
             "<input type='file' id='qFileInput' multiple accept='image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip' style='display:none'>"+
           "</div>"+
           "<div class='att-list-items' id='qAttList'></div>"+
@@ -3681,8 +3668,7 @@ function renderLibrary(){
     });
   });
 
-  var html = pageHead("library", "전사 프로젝트 첨부자료 및 구글드라이브 파일 통합 관리 (업로드 · 보기 · 다운로드 · 삭제)",
-    "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener' style='display:inline-flex; align-items:center; gap:6px; padding:6px 14px; background:var(--emerald); color:#fff; font-weight:600; border-radius:6px; text-decoration:none;'>📁 구글드라이브 공유폴더 ↗</a>"+
+  var html = pageHead("library", "전사 프로젝트 첨부자료 통합 관리 (업로드 · 보기 · 다운로드 · 삭제)",
     "<button class='btn primary' id='libUploadBtn'>+ 자료실 파일 업로드</button>"+
     "<input type='file' id='libFileInput' multiple accept='image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip' style='display:none'>");
 
