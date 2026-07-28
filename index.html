@@ -1573,7 +1573,10 @@ function openForm(table, row, defaults){
 
   if (attFormBox){
     setupDragAndDrop(attFormBox, function(files){
-      handleFileUploadOrDrivePrompt(files, currentAtts, renderModalAtts);
+      handleFileUploadOrDrivePrompt(files, currentAtts, function(){
+        if (row && (row.id || row.name)) saveProjectAttachments(row.id, currentAtts, row.name);
+        renderModalAtts();
+      });
     });
   }
 
@@ -1624,7 +1627,10 @@ function openForm(table, row, defaults){
     attFileInput.onchange = function(){
       var files = attFileInput.files;
       if (files && files.length){
-        handleFileUploadOrDrivePrompt(files, currentAtts, renderModalAtts);
+        handleFileUploadOrDrivePrompt(files, currentAtts, function(){
+          if (row && (row.id || row.name)) saveProjectAttachments(row.id, currentAtts, row.name);
+          renderModalAtts();
+        });
       }
       attFileInput.value = "";
     };
@@ -2833,7 +2839,11 @@ function openQuickAttachmentDialog(p){
 
   if (qFormBox){
     setupDragAndDrop(qFormBox, function(files){
-      handleFileUploadOrDrivePrompt(files, curAtts, renderQList);
+      handleFileUploadOrDrivePrompt(files, curAtts, function(){
+        saveProjectAttachments(p.id, curAtts, p.name);
+        renderQList();
+        drawDetail();
+      });
     });
   }
 
@@ -2873,7 +2883,9 @@ function openQuickAttachmentDialog(p){
         var i = parseInt(b.getAttribute("data-qdel"), 10);
         var removed = curAtts.splice(i, 1);
         if (removed && removed[0]) deleteFileFromIDB(removed[0].idbKey || removed[0].id);
+        saveProjectAttachments(p.id, curAtts, p.name);
         renderQList();
+        drawDetail();
       };
     });
   }
@@ -2882,7 +2894,11 @@ function openQuickAttachmentDialog(p){
   qFileInput.onchange = function(){
     var files = qFileInput.files;
     if (files && files.length){
-      handleFileUploadOrDrivePrompt(files, curAtts, renderQList);
+      handleFileUploadOrDrivePrompt(files, curAtts, function(){
+        saveProjectAttachments(p.id, curAtts, p.name);
+        renderQList();
+        drawDetail();
+      });
     }
     qFileInput.value = "";
   };
@@ -2901,7 +2917,9 @@ function openQuickAttachmentDialog(p){
       size: '링크',
       date: nowStr
     });
+    saveProjectAttachments(p.id, curAtts, p.name);
     renderQList();
+    drawDetail();
   };
 
   renderQList();
