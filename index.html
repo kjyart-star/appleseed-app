@@ -1186,6 +1186,43 @@ function addFilesToAtts(files, attArray, callback){
     reader.readAsDataURL(f);
   });
 }
+function handleFileUploadOrDrivePrompt(files, attArray, onComplete){
+  var filesArr = Array.from(files||[]);
+  if (!filesArr.length) return;
+  var nowStr = seoulNow().toISOString().slice(0,10);
+  
+  var overSized = filesArr.filter(function(f){ return f.size > 3 * 1024 * 1024; });
+  if (overSized.length > 0){
+    confirmDlg(
+      "⚠️ 3MB를 초과하는 대용량 파일(<b>"+esc(overSized[0].name)+"</b>, "+formatBytes(overSized[0].size)+")은 구글시트 DB 안정적 저장을 위해 구글드라이브 <b>'프로젝트관리'</b> 공유폴더에 업로드 후 링크로 등록하는 것이 원칙입니다.<br><br>구글드라이브 공유폴더를 바로 여시겠습니까?",
+      "📁 구글드라이브 폴더 열기 & 업로드",
+      "대용량 파일 구글드라이브 저장 안내"
+    ).then(function(ok){
+      if (ok){
+        window.open("https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41", "_blank");
+        setTimeout(function(){
+          var linkUrl = prompt("구글드라이브 폴더에 파일을 놓은 후 생성된 파일/폴더 공유 링크(또는 URL)를 입력하세요:", "https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41");
+          if (linkUrl && linkUrl.trim()){
+            var title = prompt("등록할 자료 제목을 입력하세요:", overSized[0].name) || overSized[0].name;
+            attArray.push({
+              id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+              name: title.trim(),
+              type: getAttType(overSized[0].name, overSized[0].type),
+              url: linkUrl.trim(),
+              size: formatBytes(overSized[0].size),
+              date: nowStr
+            });
+            if (typeof onComplete === "function") onComplete();
+          }
+        }, 500);
+      } else {
+        addFilesToAtts(filesArr, attArray, onComplete);
+      }
+    });
+  } else {
+    addFilesToAtts(filesArr, attArray, onComplete);
+  }
+}
 function setupDragAndDrop(box, onFilesDropped){
   if (!box) return;
   ['dragenter', 'dragover'].forEach(function(ev){
@@ -1392,7 +1429,7 @@ function openForm(table, row, defaults){
 
   if (attFormBox){
     setupDragAndDrop(attFormBox, function(files){
-      addFilesToAtts(files, currentAtts, renderModalAtts);
+      handleFileUploadOrDrivePrompt(files, currentAtts, renderModalAtts);
     });
   }
 
@@ -1442,7 +1479,7 @@ function openForm(table, row, defaults){
     attFileInput.onchange = function(){
       var files = attFileInput.files;
       if (files && files.length){
-        addFilesToAtts(files, currentAtts, renderModalAtts);
+        handleFileUploadOrDrivePrompt(files, currentAtts, renderModalAtts);
       }
       attFileInput.value = "";
     };
@@ -2480,7 +2517,7 @@ function mountProjectWorkspace(container){
     if (attCard){
       setupDragAndDrop(attCard, function(files){
         var curAtts = Array.isArray(p.attachments) ? p.attachments.slice() : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
-        addFilesToAtts(files, curAtts, function(){
+        handleFileUploadOrDrivePrompt(files, curAtts, function(){
           crud("PATCH", "projects", p.id, { attachments: curAtts });
         });
       });
@@ -2639,7 +2676,7 @@ function openQuickAttachmentDialog(p){
 
   if (qFormBox){
     setupDragAndDrop(qFormBox, function(files){
-      addFilesToAtts(files, curAtts, renderQList);
+      handleFileUploadOrDrivePrompt(files, curAtts, renderQList);
     });
   }
 
@@ -2687,7 +2724,7 @@ function openQuickAttachmentDialog(p){
   qFileInput.onchange = function(){
     var files = qFileInput.files;
     if (files && files.length){
-      addFilesToAtts(files, curAtts, renderQList);
+      handleFileUploadOrDrivePrompt(files, curAtts, renderQList);
     }
     qFileInput.value = "";
   };
