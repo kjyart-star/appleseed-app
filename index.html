@@ -1016,13 +1016,26 @@ function extractAttachmentsFromProject(p){
   /* 구글 시트 DB memos 테이블에서 온라인 파일 보관 데이터 조회 및 복원 */
   var memos = (state.data && Array.isArray(state.data.memos)) ? state.data.memos : [];
   var memoFileMap = {};
+  var memoChunks = {};
   memos.forEach(function(m){
-    if (m && m.title && m.title.indexOf("[FILE:") === 0){
+    if (!m || !m.title) return;
+    if (m.title.indexOf("[FILE:") === 0){
       try {
         var fileId = m.title.split("[FILE:")[1].split("]")[0];
         memoFileMap[fileId] = m.content;
       } catch(err){}
+    } else if (m.title.indexOf("[CHUNK:") === 0){
+      try {
+        var parts = m.title.split("[CHUNK:")[1].split("]")[0].split(":");
+        var cFileId = parts[0], cIdx = parseInt(parts[1],10);
+        if (!memoChunks[cFileId]) memoChunks[cFileId] = [];
+        memoChunks[cFileId][cIdx] = m.content || "";
+      } catch(err){}
     }
+  });
+  
+  Object.keys(memoChunks).forEach(function(cId){
+    memoFileMap[cId] = memoChunks[cId].join("");
   });
   
   var gdriveFolderUrl = "https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41";
@@ -1323,42 +1336,46 @@ function addFilesToAtts(files, attArray, callback){
     };
     
     var reader = new FileReader();
-    reader.onload = async function(e){
+    reader.onload = function(e){
       var dataUrl = e.target.result;
-      var pureBase64 = dataUrl.split(",")[1] || dataUrl;
-      attObj.url = dataUrl;
-      localStorage.setItem("appleseed_att_data_" + attId, dataUrl);
+      var pureBase64 = dataUrl ? (dataUrl.split(",")[1] || dataUrl) : "";
       
+      attObj.url = dataUrl;
       try {
-        var res = await apiSend("POST", null, {
-          action: "uploadDrive",
-          folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
-          fileName: f.name,
-          mimeType: f.type || "application/octet-stream",
-          fileData: pureBase64
-        });
-        if (res && res.ok && (res.fileUrl || res.downloadUrl)){
-          attObj.url = res.downloadUrl || res.fileUrl;
-          attObj.gdriveId = res.fileId;
-        } else {
-          var res2 = await apiSend("POST", "memos", null, {
-            title: "[FILE:" + attId + "]" + f.name,
-            content: dataUrl
-          });
-          if (res2 && res2.row && res2.row.id){ attObj.memoId = res2.row.id; }
-        }
-      } catch(err){
-        try {
-          var res2 = await apiSend("POST", "memos", null, {
-            title: "[FILE:" + attId + "]" + f.name,
-            content: dataUrl
-          });
-          if (res2 && res2.row && res2.row.id){ attObj.memoId = res2.row.id; }
-        } catch(e2){}
-      }
+        localStorage.setItem("appleseed_att_data_" + attId, dataUrl);
+      } catch(storageErr){ console.warn("LocalStorage full, stored in memory"); }
       
       attArray.push(attObj);
       loadedN++;
+      
+      /* 백그라운드 서버 동기화 (오류 발생 시에도 앱 등록은 100% 보장) */
+      (async function(){
+        try {
+          var res = await apiSend("POST", null, {
+            action: "uploadDrive",
+            folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
+            fileName: f.name,
+            mimeType: f.type || "application/octet-stream",
+            fileData: pureBase64
+          });
+          if (res && res.ok && (res.fileUrl || res.downloadUrl)){
+            attObj.url = res.downloadUrl || res.fileUrl;
+            attObj.gdriveId = res.fileId;
+          } else {
+            /* 30,000자 단위 청크 분할하여 구글 시트 메모 테이블 안전 저장 */
+            var chunkSize = 30000;
+            var totalChunks = Math.ceil(dataUrl.length / chunkSize);
+            for (var cIdx = 0; cIdx < totalChunks; cIdx++){
+              var chunkStr = dataUrl.substr(cIdx * chunkSize, chunkSize);
+              await apiSend("POST", "memos", null, {
+                title: "[CHUNK:" + attId + ":" + cIdx + ":" + totalChunks + "]" + f.name,
+                content: chunkStr
+              });
+            }
+          }
+        } catch(asyncErr){ console.warn("Background sync warning:", asyncErr); }
+      })();
+      
       if (loadedN === filesArr.length && typeof callback === "function") callback();
     };
     reader.onerror = function(){
