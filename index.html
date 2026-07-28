@@ -1255,7 +1255,7 @@ function openForm(table, row, defaults){
       body += "<div class='fld'><label>"+esc(label)+"</label>"+
         "<div class='att-form-box' id='f_attachments_box'>"+
           "<div style='display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;'>"+
-            "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/my-drive' target='_blank' rel='noopener'>📁 구글드라이브 (애플시드관리시스템/프로젝트관리) ↗</a>"+
+            "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener'>📁 구글드라이브 (애플시드관리시스템/프로젝트관리) ↗</a>"+
             "<span style='font-size:11.5px; color:var(--ink-3);'>PDF, 이미지, 링크 등록</span>"+
           "</div>"+
           "<div class='att-drop-hint'>📥 여기에 파일(PDF/이미지/문서)을 끌어다 놓으세요</div>"+
@@ -2285,7 +2285,7 @@ function mountProjectWorkspace(container){
     var atts = Array.isArray(p.attachments) ? p.attachments : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
     html += "<section class='proj-card' id='proj_att_card'><div class='proj-card-h'>📁 첨부파일 & 구글드라이브 자료"+
       "<span class='pc-sub'>PDF · 이미지 · Drive</span>"+
-      "<a class='gdrive-link-btn' style='margin-left:auto; margin-bottom:0;' href='https://drive.google.com/drive/u/0/my-drive' target='_blank' rel='noopener'>📁 구글드라이브 ↗</a>"+
+      "<a class='gdrive-link-btn' style='margin-left:auto; margin-bottom:0;' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener'>📁 구글드라이브 ↗</a>"+
       "<button class='btn sm ghost proj-mini-add' data-add-att>+ 첨부 추가</button></div>"+
       "<div class='att-drop-hint' style='margin:10px 16px 0; cursor:pointer;' data-add-att>📥 여기에 파일(PDF/이미지/문서)을 끌어다 놓으시거나 클릭하여 추가하세요</div>";
     
@@ -2481,7 +2481,7 @@ function openQuickAttachmentDialog(p){
   var bg = el("<div class='modal-bg'><div class='modal'><div class='modal-h'><h3>📁 프로젝트 첨부자료 · "+esc(p.name||"")+"</h3><button class='icon-btn' id='qClose'>✕</button></div>"+
     "<div class='modal-b'>"+
       "<div class='fld'><label>구글드라이브 저장소</label>"+
-        "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/my-drive' target='_blank' rel='noopener'>📁 구글드라이브 (애플시드관리시스템/프로젝트관리) 바로가기 ↗</a>"+
+        "<a class='gdrive-link-btn' href='https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41' target='_blank' rel='noopener'>📁 구글드라이브 (애플시드관리시스템/프로젝트관리) 바로가기 ↗</a>"+
       "</div>"+
       "<div class='fld'><label>첨부파일 / 링크 추가 (PDF, 이미지, 외부링크)</label>"+
         "<div class='att-form-box' id='qAttFormBox'>"+
