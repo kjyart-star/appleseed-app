@@ -2987,9 +2987,10 @@ function openQuickAttachmentDialog(p){
 
   renderQList();
 
-  bg.querySelector("#qSave").onclick = async function(){
+  bg.querySelector("#qSave").onclick = function(){
+    saveProjectAttachments(p.id, curAtts, p.name);
+    drawDetail();
     close();
-    await crud("PATCH", "projects", p.id, { attachments: curAtts });
   };
 }
 
