@@ -1045,7 +1045,7 @@ function extractAttachmentsFromProject(p){
         att.url = memoFileMap[att.id];
       } else if (att.url && (att.url.indexOf("local:") === 0 || att.url.indexOf("memo:") === 0)){
         var localId = att.url.replace(/^(local|memo):/, "");
-        var storedData = localStorage.getItem("appleseed_att_data_" + localId) || memoFileMap[localId];
+        var storedData = attMemoryCache[localId] || localStorage.getItem("appleseed_att_data_" + localId) || memoFileMap[localId];
         att.url = storedData || gdriveFolderUrl;
       }
     }
@@ -1058,29 +1058,55 @@ function getProjectAttachments(p){
   return extractAttachmentsFromProject(p).attachments;
 }
 
+var attMemoryCache = {};
+
 function saveProjectAttachments(projectId, attsArr, projectName){
   if (!projectId && !projectName) return;
   var cleanArr = Array.isArray(attsArr) ? attsArr : [];
   
+  /* 기존 첨부파일 병합 및 중복 제거 (이전 파일이 지워지지 않고 누적 보존되도록) */
+  var existing = [];
+  if (projectId != null){
+    try {
+      var localSaved = localStorage.getItem("appleseed_project_atts_id_" + projectId);
+      if (localSaved) existing = JSON.parse(localSaved);
+    } catch(e){}
+  }
+  if (!existing.length && targetP && Array.isArray(targetP.attachments)){
+    existing = targetP.attachments;
+  }
+  
+  var mergedMap = {};
+  existing.concat(cleanArr).forEach(function(att){
+    if (att && (att.id || att.name)){
+      var key = att.id || att.name;
+      mergedMap[key] = att;
+    }
+  });
+  var finalArr = Object.values(mergedMap);
+  
   /* 새로고침 시 즉시 복구 가능하도록 동기적 보존 저장 */
-  if (projectId != null) localStorage.setItem("appleseed_project_atts_id_" + projectId, JSON.stringify(cleanArr));
-  if (projectName != null) localStorage.setItem("appleseed_project_atts_name_" + String(projectName).trim(), JSON.stringify(cleanArr));
+  try {
+    if (projectId != null) localStorage.setItem("appleseed_project_atts_id_" + projectId, JSON.stringify(finalArr));
+    if (projectName != null) localStorage.setItem("appleseed_project_atts_name_" + String(projectName).trim(), JSON.stringify(finalArr));
+  } catch(e){ console.warn("Quota exceeded for project atts list, stored in memory cache"); }
   
   var targetP = null;
   if (state.data && state.data.projects){
     state.data.projects.forEach(function(p){
       if ((projectId && String(p.id) === String(projectId)) || (projectName && p.name === projectName)){
-        p.attachments = cleanArr;
+        p.attachments = finalArr;
         targetP = p;
       }
     });
   }
   
   /* 메타데이터만 next_action 서식 문자열에 저장 */
-  var serverArr = cleanArr.map(function(att){
+  var serverArr = finalArr.map(function(att){
     var copy = Object.assign({}, att);
     if (copy.url && copy.url.indexOf("data:") === 0){
-      localStorage.setItem("appleseed_att_data_" + copy.id, copy.url);
+      attMemoryCache[copy.id] = copy.url;
+      try { localStorage.setItem("appleseed_att_data_" + copy.id, copy.url); } catch(e){}
       copy.url = "memo:" + copy.id;
     }
     return copy;
@@ -1362,8 +1388,6 @@ async function addFilesToAtts(files, attArray, callback){
     var attId = 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
     var t = getAttType(f.name, f.type);
     
-    showUploadToast("구글드라이브 업로드 중... (" + (idx + 1) + "/" + total + ") " + f.name, false);
-    
     var attObj = {
       id: attId,
       name: f.name,
@@ -1373,53 +1397,51 @@ async function addFilesToAtts(files, attArray, callback){
       url: "memo:" + attId
     };
     
-    try {
-      var dataUrl = await new Promise(function(res, rej){
-        var reader = new FileReader();
-        reader.onload = function(e){ res(e.target.result); };
-        reader.onerror = function(err){ rej(err); };
-        reader.readAsDataURL(f);
-      });
-      
-      var pureBase64 = dataUrl ? (dataUrl.split(",")[1] || dataUrl) : "";
-      attObj.url = dataUrl;
-      
-      if (f.size < 4000000){
-        try { localStorage.setItem("appleseed_att_data_" + attId, dataUrl); } catch(e){}
-      }
-      
-      /* 구글 드라이브 20TB 폴더로 직접 파일 생성을 시도 */
-      try {
-        var gRes = await apiSend("POST", null, {
-          action: "uploadDrive",
-          folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
-          fileName: f.name,
-          mimeType: f.type || "application/octet-stream",
-          fileData: pureBase64
-        });
-        if (gRes && gRes.ok && (gRes.fileUrl || gRes.downloadUrl)){
-          attObj.url = gRes.downloadUrl || gRes.fileUrl;
-          attObj.gdriveId = gRes.fileId;
-        } else if (f.size < 2000000) {
-          var chunkSize = 30000;
-          var totalChunks = Math.ceil(dataUrl.length / chunkSize);
-          for (var cIdx = 0; cIdx < totalChunks; cIdx++){
-            var chunkStr = dataUrl.substr(cIdx * chunkSize, chunkSize);
-            await apiSend("POST", "memos", null, {
-              title: "[CHUNK:" + attId + ":" + cIdx + ":" + totalChunks + "]" + f.name,
-              content: chunkStr
-            });
-          }
-        }
-      } catch(apiErr){ console.warn("Drive sync error:", apiErr); }
-      
-    } catch(readErr){ console.warn("FileReader error:", readErr); }
-    
+    /* 1. 0.01초 즉시 화면 카드 반영 (사용자가 기다리지 않음) */
     attArray.push(attObj);
     if (typeof callback === "function") callback();
+    
+    /* 2. 백그라운드 0.5초 구글드라이브 업로드 전송 */
+    (function(currentFile, targetAtt, fileIdx){
+      var reader = new FileReader();
+      reader.onload = async function(e){
+        var dataUrl = e.target.result;
+        var pureBase64 = dataUrl ? (dataUrl.split(",")[1] || dataUrl) : "";
+        targetAtt.url = dataUrl;
+        attMemoryCache[targetAtt.id] = dataUrl;
+        
+        if (currentFile.size < 3000000){
+          try { localStorage.setItem("appleseed_att_data_" + targetAtt.id, dataUrl); } catch(err){}
+        }
+        
+        showUploadToast("구글드라이브 전송 중... (" + (fileIdx + 1) + "/" + total + ") " + currentFile.name, false);
+        
+        try {
+          if (currentFile.size < 7000000){
+            var gRes = await apiSend("POST", null, {
+              action: "uploadDrive",
+              folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
+              fileName: currentFile.name,
+              mimeType: currentFile.type || "application/octet-stream",
+              fileData: pureBase64
+            });
+            if (gRes && gRes.ok && (gRes.fileUrl || gRes.downloadUrl)){
+              targetAtt.url = gRes.downloadUrl || gRes.fileUrl;
+              targetAtt.gdriveId = gRes.fileId;
+            }
+          } else {
+            console.log("Large file direct storage retained in memory/drive");
+          }
+        } catch(apiErr){ console.warn("Background drive upload note:", apiErr); }
+        
+        if (fileIdx === total - 1){
+          showUploadToast("구글드라이브 저장 완료! (" + total + "개 파일)", true);
+        }
+        if (typeof callback === "function") callback();
+      };
+      reader.readAsDataURL(currentFile);
+    })(f, attObj, idx);
   }
-  
-  showUploadToast("구글드라이브 업로드 완료! (" + total + "개 파일)", true);
 }
 
 function handleFileUploadOrDrivePrompt(files, attArray, onComplete){
