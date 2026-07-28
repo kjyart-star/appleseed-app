@@ -489,17 +489,63 @@
   .proj-empty h3{font-size:15px; color:var(--ink); margin:0;}
   .proj-empty p{font-size:12.5px; margin:0 0 6px;}
   /* 목록 뷰 */
-  .proj-toolbar{padding:14px 16px; border-bottom:1px solid var(--line); display:flex; flex-direction:column; gap:12px;}
-  .proj-toolbar .proj-search{max-width:360px;}
-  .proj-frow{display:flex; align-items:flex-start; gap:10px;}
-  .proj-frow-k{font-size:11.5px; font-weight:800; color:var(--ink-3); width:52px; flex:none; padding-top:7px;}
-  .proj-chips{display:flex; flex-wrap:wrap; gap:8px;}
+  .proj-toolbar{padding:20px 24px; border-bottom:1px solid var(--line); display:flex; flex-direction:column; gap:16px;}
+  .proj-search-wrap{position:relative; width:100%; max-width:520px;}
+  .proj-search-wrap .search-icon{position:absolute; left:14px; top:50%; transform:translateY(-50%); font-size:14px; color:var(--ink-3); pointer-events:none;}
+  .proj-search-wrap .proj-search{width:100%; padding-left:38px; height:42px; border-radius:999px; font-size:13.5px; background:var(--surface-2); border:1px solid var(--line-strong); color:var(--ink); font-family:var(--font);}
+  .proj-search-wrap .proj-search:focus{outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(92,187,146,0.15);}
+  .proj-frow{display:flex; align-items:center; gap:14px; min-height:36px;}
+  .proj-frow-k{font-size:12.5px; font-weight:700; color:var(--ink-3); width:52px; flex:none; display:flex; align-items:center;}
+  .proj-chips{display:flex; flex-wrap:wrap; align-items:center; gap:8px;}
+  .proj-toolbar .proj-chips{display:flex; flex-wrap:wrap; align-items:center; gap:12px 28px;}
   .proj-chip{border:1px solid var(--line-strong); background:var(--surface-2); color:var(--ink-2);
     border-radius:999px; padding:6px 13px; font-size:12.5px; font-weight:700; cursor:pointer;
     display:inline-flex; align-items:center;}
   .proj-chip:hover{color:var(--ink); border-color:var(--accent);}
   .proj-chip.on{background:var(--accent); color:#fff; border-color:var(--accent);}
   .proj-chip .chip-n{margin-left:6px; font-size:11px; opacity:.8; font-weight:800;}
+  .proj-toolbar .proj-chip{
+    border: none;
+    background: transparent;
+    color: var(--ink-2);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all .15s ease;
+  }
+  .proj-toolbar .proj-chip:hover{
+    color: var(--ink);
+    background: var(--surface-2);
+  }
+  .proj-toolbar .proj-chip.on{
+    background: #00897b;
+    color: #ffffff;
+    font-weight: 700;
+    box-shadow: 0 2px 8px rgba(0, 137, 123, 0.25);
+  }
+  .proj-toolbar .proj-chip .chip-n{
+    margin-left: 2px;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    color: var(--ink-3);
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1;
+  }
+  .proj-toolbar .proj-chip.on .chip-n{
+    background: rgba(255, 255, 255, 0.22);
+    color: #ffffff;
+  }
   .proj-table{min-width:860px;}
   .proj-table th.sortable{cursor:pointer; user-select:none; white-space:nowrap;}
   .proj-table th.sortable:hover{color:var(--ink);}
@@ -747,7 +793,7 @@
 
 /* ============ 접근 키 ============ */
 var qs = new URLSearchParams(location.search);
-var KEY = qs.get("key") || localStorage.getItem("appleseed_key") || "";
+var KEY = qs.get("key") || localStorage.getItem("appleseed_key") || "72ddd03745f902086cd1eea4"; /* 로컬 실행본 전용 내장 키 — 외부 공유 금지 */
 if (qs.get("key")) localStorage.setItem("appleseed_key", qs.get("key"));
 
 /* ============ 상태 ============ */
@@ -1820,7 +1866,10 @@ function renderProjectList(){
     pageHead("projects","목록 · 필터 · 정렬 · 행 클릭 시 대시보드에서 상세","<button class='btn primary' data-pl-add>+ 프로젝트 추가</button>")+
     "<div class='kpis' data-pl-kpis></div>"+
     "<section class='panel'><div class='proj-toolbar'>"+
-      "<input class='proj-search' type='text' placeholder='프로젝트·고객사·상태 검색' data-pl-search>"+
+      "<div class='proj-search-wrap'>"+
+        "<span class='search-icon'>🔍</span>"+
+        "<input class='proj-search' type='text' placeholder='프로젝트명, 고객, 상태, 담당자로 검색' data-pl-search>"+
+      "</div>"+
       "<div data-pl-filters></div></div>"+
       "<div class='tbl-scroll' data-pl-table></div></section>";
   var searchEl = C.querySelector("[data-pl-search]"); searchEl.value = plSearch;
