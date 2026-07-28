@@ -979,38 +979,50 @@ function applyTombstones(d){
 }
 function getProjectAttachments(p){
   if (!p) return [];
-  var localKey = "appleseed_atts_" + p.id;
-  var stored = localStorage.getItem(localKey);
-  if (stored){
-    try {
-      var arr = JSON.parse(stored);
-      if (Array.isArray(arr) && arr.length > 0) return arr;
-    } catch(e){}
+  var arr = null;
+  /* 1. ID 기준 조회 (아이디 변경/동기화 보완) */
+  if (p.id != null){
+    var s1 = localStorage.getItem("appleseed_atts_id_" + p.id) || localStorage.getItem("appleseed_atts_" + p.id);
+    if (s1){ try { arr = JSON.parse(s1); } catch(e){} }
   }
-  if (Array.isArray(p.attachments) && p.attachments.length > 0) return p.attachments;
-  if (typeof p.attachments === "string" && p.attachments.trim()){
-    try {
-      var a = JSON.parse(p.attachments);
-      if (Array.isArray(a)) return a;
-    } catch(e){}
+  /* 2. 프로젝트명(name) 기준 조회 (구글 시트 ID 변경 또는 신규 생성 시 보완) */
+  if ((!arr || !arr.length) && p.name){
+    var s2 = localStorage.getItem("appleseed_atts_name_" + String(p.name).trim());
+    if (s2){ try { arr = JSON.parse(s2); } catch(e){} }
   }
-  return (Array.isArray(p.attachments) ? p.attachments : []);
+  /* 3. p.attachments 객체 자체 보존 조회 */
+  if (!arr || !arr.length){
+    if (Array.isArray(p.attachments) && p.attachments.length > 0) arr = p.attachments;
+    else if (typeof p.attachments === "string" && p.attachments.trim()){
+      try { arr = JSON.parse(p.attachments); } catch(e){}
+    }
+  }
+  return Array.isArray(arr) ? arr : [];
 }
 
-function saveProjectAttachments(projectId, attsArr){
-  if (!projectId) return;
-  var key = "appleseed_atts_" + projectId;
+function saveProjectAttachments(projectId, attsArr, projectName){
+  if (!projectId && !projectName) return;
   var cleanArr = Array.isArray(attsArr) ? attsArr : [];
-  localStorage.setItem(key, JSON.stringify(cleanArr));
+  var jsonStr = JSON.stringify(cleanArr);
+  
+  if (projectId != null){
+    localStorage.setItem("appleseed_atts_id_" + projectId, jsonStr);
+    localStorage.setItem("appleseed_atts_" + projectId, jsonStr);
+  }
+  if (projectName != null && String(projectName).trim()){
+    localStorage.setItem("appleseed_atts_name_" + String(projectName).trim(), jsonStr);
+  }
   
   if (state.data && state.data.projects){
     state.data.projects.forEach(function(p){
-      if (String(p.id) === String(projectId)){
+      if ((projectId && String(p.id) === String(projectId)) || (projectName && p.name === projectName)){
         p.attachments = cleanArr;
       }
     });
   }
-  crud("PATCH", "projects", projectId, { attachments: cleanArr });
+  if (projectId != null){
+    crud("PATCH", "projects", projectId, { attachments: cleanArr });
+  }
 }
 
 async function loadData(){
@@ -1672,8 +1684,17 @@ function openForm(table, row, defaults){
       }
     });
     close();
+    var pname = obj.name || (row ? row.name : "");
+    if (table === "projects"){
+      if (editing && row && row.id) saveProjectAttachments(row.id, currentAtts, pname);
+    }
     if (editing) await crud("PATCH", table, row.id, obj);
-    else await crud("POST", table, null, obj);
+    else {
+      var res = await crud("POST", table, null, obj);
+      if (table === "projects" && res && res.row && res.row.id){
+        saveProjectAttachments(res.row.id, currentAtts, pname);
+      }
+    }
   };
 }
 function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses"}; return m[t]||t; }
@@ -2651,7 +2672,7 @@ function mountProjectWorkspace(container){
       setupDragAndDrop(attCard, function(files){
         var curAtts = getProjectAttachments(p);
         handleFileUploadOrDrivePrompt(files, curAtts, function(){
-          saveProjectAttachments(p.id, curAtts);
+          saveProjectAttachments(p.id, curAtts, p.name);
           drawDetail();
         });
       });
@@ -2690,7 +2711,7 @@ function mountProjectWorkspace(container){
         var curAtts = getProjectAttachments(p);
         var removed = curAtts.splice(aIdx, 1);
         if (removed && removed[0]) deleteFileFromIDB(removed[0].idbKey || removed[0].id);
-        saveProjectAttachments(p.id, curAtts);
+        saveProjectAttachments(p.id, curAtts, p.name);
         drawDetail();
       };
     });
