@@ -1325,20 +1325,36 @@ function addFilesToAtts(files, attArray, callback){
     var reader = new FileReader();
     reader.onload = async function(e){
       var dataUrl = e.target.result;
+      var pureBase64 = dataUrl.split(",")[1] || dataUrl;
       attObj.url = dataUrl;
       localStorage.setItem("appleseed_att_data_" + attId, dataUrl);
       
-      /* 구글 시트 DB memos 테이블에 온라인 파일 보관 기록 생성 (창 팝업 없이 인앱 처리) */
       try {
-        var res = await apiSend("POST", "memos", null, {
-          title: "[FILE:" + attId + "]" + f.name,
-          content: dataUrl
+        var res = await apiSend("POST", null, {
+          action: "uploadDrive",
+          folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
+          fileName: f.name,
+          mimeType: f.type || "application/octet-stream",
+          fileData: pureBase64
         });
-        if (res && res.row && res.row.id){
-          attObj.memoId = res.row.id;
+        if (res && res.ok && (res.fileUrl || res.downloadUrl)){
+          attObj.url = res.downloadUrl || res.fileUrl;
+          attObj.gdriveId = res.fileId;
+        } else {
+          var res2 = await apiSend("POST", "memos", null, {
+            title: "[FILE:" + attId + "]" + f.name,
+            content: dataUrl
+          });
+          if (res2 && res2.row && res2.row.id){ attObj.memoId = res2.row.id; }
         }
       } catch(err){
-        console.warn("Cloud memo store error:", err);
+        try {
+          var res2 = await apiSend("POST", "memos", null, {
+            title: "[FILE:" + attId + "]" + f.name,
+            content: dataUrl
+          });
+          if (res2 && res2.row && res2.row.id){ attObj.memoId = res2.row.id; }
+        } catch(e2){}
       }
       
       attArray.push(attObj);
