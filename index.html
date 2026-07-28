@@ -1161,68 +1161,108 @@ function formatBytes(bytes){
   var k=1024, sizes=["B","KB","MB","GB"], i=Math.floor(Math.log(bytes)/Math.log(k));
   return parseFloat((bytes/Math.pow(k,i)).toFixed(1)) + " " + sizes[i];
 }
+/* IndexedDB 무제한 대용량 파일 저장소 엔진 */
+var dbPromise = (function initDB(){
+  return new Promise(function(resolve){
+    if (!window.indexedDB){ resolve(null); return; }
+    var req = indexedDB.open("AppleseedFilesDB", 1);
+    req.onupgradeneeded = function(e){
+      var db = e.target.result;
+      if (!db.objectStoreNames.contains("files")){
+        db.createObjectStore("files", { keyPath: "id" });
+      }
+    };
+    req.onsuccess = function(e){ resolve(e.target.result); };
+    req.onerror = function(e){ console.error("IDB error", e); resolve(null); };
+  });
+})();
+
+async function saveFileToIDB(id, blobOrFile){
+  try {
+    var db = await dbPromise;
+    if (!db) return false;
+    return new Promise(function(resolve){
+      var tx = db.transaction("files", "readwrite");
+      var store = tx.objectStore("files");
+      var req = store.put({ id: String(id), data: blobOrFile, updatedAt: Date.now() });
+      req.onsuccess = function(){ resolve(true); };
+      req.onerror = function(){ resolve(false); };
+    });
+  } catch(e){
+    console.error("IDB put error:", e);
+    return false;
+  }
+}
+
+async function getFileFromIDB(id){
+  try {
+    var db = await dbPromise;
+    if (!db) return null;
+    return new Promise(function(resolve){
+      var tx = db.transaction("files", "readonly");
+      var store = tx.objectStore("files");
+      var req = store.get(String(id));
+      req.onsuccess = function(e){ resolve(e.target.result ? e.target.result.data : null); };
+      req.onerror = function(){ resolve(null); };
+    });
+  } catch(e){
+    console.error("IDB get error:", e);
+    return null;
+  }
+}
+
+async function deleteFileFromIDB(id){
+  try {
+    var db = await dbPromise;
+    if (!db) return;
+    var tx = db.transaction("files", "readwrite");
+    tx.objectStore("files").delete(String(id));
+  } catch(e){}
+}
+
 function addFilesToAtts(files, attArray, callback){
   var filesArr = Array.from(files||[]);
   if (!filesArr.length) return;
   var nowStr = seoulNow().toISOString().slice(0,10);
   var loadedN = 0;
+  
   filesArr.forEach(function(f){
-    var reader = new FileReader();
-    reader.onload = function(e){
-      var t = getAttType(f.name, f.type);
-      attArray.push({
-        id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+    var attId = 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
+    var t = getAttType(f.name, f.type);
+    
+    saveFileToIDB(attId, f).then(function(savedIDB){
+      var attObj = {
+        id: attId,
         name: f.name,
         type: t,
-        url: e.target.result,
         size: formatBytes(f.size),
-        date: nowStr
-      });
-      loadedN++;
-      if (loadedN === filesArr.length && typeof callback === "function"){
-        callback();
-      }
-    };
-    reader.readAsDataURL(f);
-  });
-}
-function handleFileUploadOrDrivePrompt(files, attArray, onComplete){
-  var filesArr = Array.from(files||[]);
-  if (!filesArr.length) return;
-  var nowStr = seoulNow().toISOString().slice(0,10);
-  
-  var overSized = filesArr.filter(function(f){ return f.size > 3 * 1024 * 1024; });
-  if (overSized.length > 0){
-    confirmDlg(
-      "⚠️ 3MB를 초과하는 대용량 파일(<b>"+esc(overSized[0].name)+"</b>, "+formatBytes(overSized[0].size)+")은 구글시트 DB 안정적 저장을 위해 구글드라이브 <b>'프로젝트관리'</b> 공유폴더에 업로드 후 링크로 등록하는 것이 원칙입니다.<br><br>구글드라이브 공유폴더를 바로 여시겠습니까?",
-      "📁 구글드라이브 폴더 열기 & 업로드",
-      "대용량 파일 구글드라이브 저장 안내"
-    ).then(function(ok){
-      if (ok){
-        window.open("https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41", "_blank");
-        setTimeout(function(){
-          var linkUrl = prompt("구글드라이브 폴더에 파일을 놓은 후 생성된 파일/폴더 공유 링크(또는 URL)를 입력하세요:", "https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41");
-          if (linkUrl && linkUrl.trim()){
-            var title = prompt("등록할 자료 제목을 입력하세요:", overSized[0].name) || overSized[0].name;
-            attArray.push({
-              id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
-              name: title.trim(),
-              type: getAttType(overSized[0].name, overSized[0].type),
-              url: linkUrl.trim(),
-              size: formatBytes(overSized[0].size),
-              date: nowStr
-            });
-            if (typeof onComplete === "function") onComplete();
-          }
-        }, 500);
+        date: nowStr,
+        idbKey: attId
+      };
+      
+      /* 이미지 파일 2MB 이하일 경우 섬네일 미리보기용 dataURL 생성 */
+      if (t === "image" && f.size <= 2 * 1024 * 1024){
+        var reader = new FileReader();
+        reader.onload = function(e){
+          attObj.url = e.target.result;
+          attArray.push(attObj);
+          loadedN++;
+          if (loadedN === filesArr.length && typeof callback === "function") callback();
+        };
+        reader.readAsDataURL(f);
       } else {
-        addFilesToAtts(filesArr, attArray, onComplete);
+        attArray.push(attObj);
+        loadedN++;
+        if (loadedN === filesArr.length && typeof callback === "function") callback();
       }
     });
-  } else {
-    addFilesToAtts(filesArr, attArray, onComplete);
-  }
+  });
 }
+
+function handleFileUploadOrDrivePrompt(files, attArray, onComplete){
+  addFilesToAtts(files, attArray, onComplete);
+}
+
 function setupDragAndDrop(box, onFilesDropped){
   if (!box) return;
   ['dragenter', 'dragover'].forEach(function(ev){
@@ -1259,18 +1299,35 @@ function dataURLtoBlob(dataurl) {
   }
 }
 
-function openAttachmentPreview(att){
-  if (!att || !att.url) return;
+async function getAttachmentBlob(att){
+  if (!att) return null;
+  if (att.idbKey || att.id){
+    var blob = await getFileFromIDB(att.idbKey || att.id);
+    if (blob) return blob;
+  }
+  if (att.url && att.url.indexOf("data:") === 0){
+    return dataURLtoBlob(att.url);
+  }
+  return null;
+}
+
+async function openAttachmentPreview(att){
+  if (!att) return;
   var url = att.url;
-  var isData = url.indexOf("data:") === 0;
   
-  if (att.type === "link" || /^https?:\/\//i.test(url)){
+  if (att.type === "link" || (url && /^https?:\/\//i.test(url))){
     window.open(url, "_blank");
     return;
   }
   
-  var blob = isData ? dataURLtoBlob(url) : null;
-  var blobUrl = blob ? URL.createObjectURL(blob) : url;
+  var blob = await getAttachmentBlob(att);
+  var blobUrl = blob ? URL.createObjectURL(blob) : (url && url.indexOf("data:")===0 ? url : null);
+  if (!blobUrl){
+    if (url) { window.open(url, "_blank"); return; }
+    alert("첨부파일 데이터를 찾을 수 없습니다.");
+    return;
+  }
+  
   var isPdf = (att.type || "").toLowerCase() === "pdf" || /\.pdf$/i.test(att.name || "");
   var isImg = (att.type || "").toLowerCase() === "image" || /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(att.name || "");
 
@@ -1282,7 +1339,7 @@ function openAttachmentPreview(att){
   } else {
     contentHtml = "<div style='text-align:center; padding:40px 20px;'><div style='font-size:36px; margin-bottom:12px;'>📁</div>"+
       "<h4>"+esc(att.name||"")+"</h4>"+
-      "<p style='font-size:13px; color:var(--ink-3); margin-top:8px;'>이 파일 형식은 직접 미리보기를 지원하지 않는 형식입니다.<br>아래 버튼을 눌러 다운로드하여 확인하세요.</p>"+
+      "<p style='font-size:13px; color:var(--ink-3); margin-top:8px;'>파일이 정상 보관되어 있습니다. 아래 버튼을 눌러 다운로드하세요.</p>"+
       "<button class='btn primary' style='margin-top:16px;' id='pDlMidBtn'>💾 파일 다운로드 ("+esc(att.size||"")+")</button></div>";
   }
 
@@ -1297,7 +1354,7 @@ function openAttachmentPreview(att){
   
   function closeModal(){
     bg.remove();
-    if (blob && isData){
+    if (blob){
       setTimeout(function(){ URL.revokeObjectURL(blobUrl); }, 1000);
     }
   }
@@ -1308,15 +1365,12 @@ function openAttachmentPreview(att){
   if (midDl) midDl.onclick = function(){ downloadAttachment(att); };
 }
 
-function downloadAttachment(att){
-  if (!att || !att.url) return;
-  var url = att.url;
+async function downloadAttachment(att){
+  if (!att) return;
   var filename = att.name || "attachment";
-  var isData = url.indexOf("data:") === 0;
+  var blob = await getAttachmentBlob(att);
   
-  if (isData){
-    var blob = dataURLtoBlob(url);
-    if (!blob) return;
+  if (blob){
     var blobUrl = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = blobUrl;
@@ -1325,14 +1379,16 @@ function downloadAttachment(att){
     a.click();
     document.body.removeChild(a);
     setTimeout(function(){ URL.revokeObjectURL(blobUrl); }, 1500);
-  } else {
+  } else if (att.url){
     var a = document.createElement("a");
-    a.href = url;
+    a.href = att.url;
     a.download = filename;
     a.target = "_blank";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  } else {
+    alert("다운로드할 파일 데이터를 찾을 수 없습니다.");
   }
 }
 
@@ -1468,7 +1524,8 @@ function openForm(table, row, defaults){
     attItemsList.querySelectorAll("[data-att-del]").forEach(function(b){
       b.onclick = function(){
         var i = parseInt(b.getAttribute("data-att-del"), 10);
-        currentAtts.splice(i, 1);
+        var removed = currentAtts.splice(i, 1);
+        if (removed && removed[0]) deleteFileFromIDB(removed[0].idbKey || removed[0].id);
         renderModalAtts();
       };
     });
@@ -2554,7 +2611,8 @@ function mountProjectWorkspace(container){
         var ok = await confirmDlg("이 첨부자료를 삭제할까요?", "삭제", "첨부자료 삭제");
         if (!ok) return;
         var curAtts = Array.isArray(p.attachments) ? p.attachments.slice() : (typeof p.attachments==='string' ? JSON.parse(p.attachments||"[]") : []);
-        curAtts.splice(aIdx, 1);
+        var removed = curAtts.splice(aIdx, 1);
+        if (removed && removed[0]) deleteFileFromIDB(removed[0].idbKey || removed[0].id);
         crud("PATCH", "projects", p.id, { attachments: curAtts });
       };
     });
@@ -2714,7 +2772,8 @@ function openQuickAttachmentDialog(p){
     qList.querySelectorAll("[data-qdel]").forEach(function(b){
       b.onclick = function(){
         var i = parseInt(b.getAttribute("data-qdel"), 10);
-        curAtts.splice(i, 1);
+        var removed = curAtts.splice(i, 1);
+        if (removed && removed[0]) deleteFileFromIDB(removed[0].idbKey || removed[0].id);
         renderQList();
       };
     });
