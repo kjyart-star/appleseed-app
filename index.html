@@ -1283,6 +1283,20 @@ function confirmDlg(msg, okLabel, title){
   });
 }
 
+function showAlertDlg(msg, title, isSuccess){
+  return new Promise(function(resolve){
+    var bg = el("<div class='modal-bg' style='z-index:999999;'><div class='modal' style='max-width:420px; border-top: 4px solid " + (isSuccess ? "#059669" : "#dc2626") + ";'>"+
+      "<div class='modal-h'><h3>" + (isSuccess ? "✅ " : "⚠️ ") + esc(title || "알림") + "</h3><button class='icon-btn' data-cf-x>✕</button></div>"+
+      "<div class='modal-b'><p style='margin:8px 0 6px; line-height:1.65; white-space:pre-wrap;'>" + esc(msg) + "</p></div>"+
+      "<div class='modal-f'><button class='btn primary " + (isSuccess ? "" : "danger") + "' data-cf-yes style='min-width:90px;'>확인</button></div></div></div>");
+    document.body.appendChild(bg);
+    function done(){ bg.remove(); resolve(true); }
+    bg.querySelector("[data-cf-x]").onclick = done;
+    bg.querySelector("[data-cf-yes]").onclick = done;
+    bg.addEventListener("mousedown", function(e){ if (e.target === bg) done(); });
+  });
+}
+
 /* ============ 마스킹 ============ */
 function applyMask(){
   var on = state.mask;
@@ -1440,6 +1454,7 @@ async function addFilesToAtts(files, attArray, callback){
       
     } catch(err){
       console.warn("File upload error:", err);
+      showAlertDlg("파일 '" + f.name + "' 업로드 중 안내:\n" + String(err.message || err), "업로드 안내", false);
       var fallbackObj = {
         id: attId,
         name: f.name,
@@ -1454,6 +1469,7 @@ async function addFilesToAtts(files, attArray, callback){
   }
   
   showUploadToast("구글드라이브 저장 완료! (" + total + "개 파일)", true);
+  showAlertDlg("선택하신 " + total + "개 파일이 구글드라이브 폴더(애플시드관리시스템/프로젝트관리)에 성공적으로 업로드 및 생성되었습니다.", "구글드라이브 업로드 완료", true);
 }
 
 function handleFileUploadOrDrivePrompt(files, attArray, onComplete){
