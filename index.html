@@ -2975,9 +2975,18 @@ function openQuickAttachmentDialog(p){
   renderQList();
 
   bg.querySelector("#qSave").onclick = function(){
-    saveProjectAttachments(p.id, curAtts, p.name);
-    drawDetail();
-    close();
+    try {
+      saveProjectAttachments(p.id, curAtts, p.name);
+    } catch(err){
+      console.error("Save error:", err);
+    }
+    bg.remove();
+    try {
+      drawDetail();
+    } catch(err){}
+  };
+  bg.onclick = function(e){
+    if (e.target === bg) bg.remove();
   };
 }
 
