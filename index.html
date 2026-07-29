@@ -632,6 +632,14 @@
     border-color:var(--accent); color:var(--accent-ink); font-weight:700; background:transparent;
   }
   .att-form-actions{display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+
+  /* ===== 게시글 인라인 이미지 & 글쓰기 첨부 드롭영역 ===== */
+  .bd-img-wrap{margin:0 0 14px;}
+  .bd-img-el{display:block; width:auto; max-width:100%; height:auto; border-radius:10px;
+    border:1px solid var(--line); background:var(--surface-2);}
+  .bd-img-cap{margin-top:6px; font-size:12px; color:var(--ink-3);}
+  .bd-form-drop{border:1px dashed var(--line); border-radius:10px; padding:12px;}
+  .bd-form-drop.att-drag-over{border-color:var(--accent); background:rgba(255,255,255,0.03);}
   .att-list-items{display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto;}
   .att-item-row{
     display:flex; align-items:center; justify-content:space-between; gap:10px;
@@ -1595,30 +1603,38 @@ async function openAttachmentPreview(att){
   var gdriveFolderUrl = "https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41";
   var url = att.url || gdriveFolderUrl;
   var driveId = parseGoogleDriveFileId(url);
-  
+
+  /* PDF는 모달 iframe 대신 새 창에서 연다 */
+  if (attIsPdf(att)){
+    if (driveId){
+      window.open("https://drive.google.com/file/d/" + driveId + "/view", "_blank", "noopener");
+      return;
+    }
+    if (url.indexOf("data:") === 0){
+      try {
+        var pdfParts = url.split(",");
+        var pdfMimeMatch = pdfParts[0].match(/:(.*?);/);
+        var pdfMime = pdfMimeMatch ? pdfMimeMatch[1] : "application/pdf";
+        var pdfBstr = atob(pdfParts[1]);
+        var pdfN = pdfBstr.length;
+        var pdfArr = new Uint8Array(pdfN);
+        while(pdfN--){ pdfArr[pdfN] = pdfBstr.charCodeAt(pdfN); }
+        var pdfBlobUrl = URL.createObjectURL(new Blob([pdfArr], { type: pdfMime }));
+        window.open(pdfBlobUrl, "_blank", "noopener");
+      } catch(pdfErr){
+        window.open(url, "_blank", "noopener");
+      }
+      return;
+    }
+  }
+
   var contentHtml = "";
   if (driveId){
     var embedUrl = "https://drive.google.com/file/d/" + driveId + "/preview";
     contentHtml = "<iframe src='"+embedUrl+"' style='width:100%; height:100%; flex:1; min-height:65vh; border:none; border-radius:8px; background:#fff;'></iframe>";
   } else if (url.indexOf("data:") === 0){
-    var isPdf = (att.type || "").toLowerCase() === "pdf" || /\.pdf$/i.test(att.name || "");
     var isImg = (att.type || "").toLowerCase() === "image" || /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(att.name || "");
-    if (isPdf){
-      try {
-        var base64Parts = url.split(",");
-        var mimeMatch = base64Parts[0].match(/:(.*?);/);
-        var mime = mimeMatch ? mimeMatch[1] : "application/pdf";
-        var bstr = atob(base64Parts[1]);
-        var n = bstr.length;
-        var u8arr = new Uint8Array(n);
-        while(n--){ u8arr[n] = bstr.charCodeAt(n); }
-        var blob = new Blob([u8arr], {type: mime});
-        var blobUrl = URL.createObjectURL(blob);
-        contentHtml = "<iframe src='"+blobUrl+"' style='width:100%; height:100%; flex:1; min-height:65vh; border:none; border-radius:8px; background:#fff;'></iframe>";
-      } catch(pdfErr){
-        contentHtml = "<iframe src='"+url+"' style='width:100%; height:100%; flex:1; min-height:65vh; border:none; border-radius:8px; background:#fff;'></iframe>";
-      }
-    } else if (isImg){
+    if (isImg){
       contentHtml = "<div style='text-align:center; padding:10px; height:100%; overflow:auto; display:flex; align-items:center; justify-content:center;'><img src='"+url+"' style='max-width:100%; max-height:85vh; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.4); object-fit:contain;'></div>";
     } else {
       contentHtml = "<div style='text-align:center; padding:40px 20px;'><div style='font-size:36px; margin-bottom:12px;'>📁</div>"+
@@ -3869,6 +3885,7 @@ var libFileId = null;
 var libBoardSearch = "";
 var libBoardPage = 1;
 var libBoardForm = null;
+var libBoardPending = [];   /* 새 글 작성 중 미리 올려둔 첨부(저장 시 새 글 id로 연결) */
 var libViewed = {};
 var libBoardFocus = false;
 var LIB_PER_PAGE = 15;
@@ -3892,6 +3909,60 @@ function boardAttBadge(att){
   var badge = (att.type || "file").toLowerCase();
   var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "link" ? "링크" : "파일";
   return "<span class='att-badge "+badge+"'>"+bLabel+"</span>";
+}
+
+/* ---- 첨부 종류 판별 & 인라인 이미지 ---- */
+function attIsImage(att){
+  if (!att) return false;
+  if ((att.type || "").toLowerCase() === "image") return true;
+  return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(att.name || "");
+}
+
+function attIsPdf(att){
+  if (!att) return false;
+  if ((att.type || "").toLowerCase() === "pdf") return true;
+  return /\.pdf$/i.test(att.name || "");
+}
+
+/* 화면에 바로 그릴 수 있는 이미지 주소. 없으면 null */
+function attImageSrc(att){
+  if (!att) return null;
+  var url = String(att.url || "");
+  var id = att.gdrive_id || parseGoogleDriveFileId(url);
+  if (id) return "https://drive.google.com/thumbnail?id=" + id + "&sz=w1000";
+  if (url.indexOf("data:") === 0) return url;
+  if (/^https?:\/\//i.test(url)) return url;
+  return null;
+}
+
+/* 이미지 첨부만 골라 세로로 나열하는 HTML. 대상이 없으면 빈 문자열 */
+function renderInlineImages(atts){
+  var arr = Array.isArray(atts) ? atts : [];
+  var out = "";
+  for (var i = 0; i < arr.length; i++){
+    var a = arr[i];
+    if (!attIsImage(a)) continue;
+    var src = attImageSrc(a);
+    if (!src) continue;
+    var nm = esc(a.name || "");
+    out += "<figure class='bd-img-wrap'>"+
+      "<img class='bd-img-el' src=\""+esc(src)+"\" alt=\""+nm+"\">"+
+      "<figcaption class='bd-img-cap'>"+nm+"</figcaption>"+
+    "</figure>";
+  }
+  return out;
+}
+
+/* 이미지 로딩 실패 시 해당 블록만 숨긴다(HTML onerror 속성 대신 JS로 바인딩) */
+function bindInlineImageFallback(root){
+  var r = root || C;
+  if (!r || !r.querySelectorAll) return;
+  var imgs = r.querySelectorAll(".bd-img-el");
+  for (var i = 0; i < imgs.length; i++){
+    (function(im){
+      im.onerror = function(){ var w = im.parentNode; if (w) w.style.display = "none"; };
+    })(imgs[i]);
+  }
 }
 
 function restoreSearchFocus(input){
@@ -4156,6 +4227,15 @@ function renderBoardDetail(){
     "<div class='bd-body'>"+(row.content ? linkify(row.content) : "(내용 없음)")+"</div>"+
   "</div></section>";
 
+  /* 이미지 첨부는 본문 아래에 바로 펼쳐 보여준다 */
+  var inlineImgHtml = renderInlineImages(atts);
+  if (inlineImgHtml){
+    html += "<section class='panel' style='margin-bottom:16px'>"+
+      "<div class='sec-head'><div><div class='eyebrow'>첨부 이미지</div><h3>이미지 미리보기</h3></div></div>"+
+      "<div class='panel-b'>"+inlineImgHtml+"</div>"+
+    "</section>";
+  }
+
   html += "<section class='panel' id='bdAttBox' style='margin-bottom:16px'>"+
     "<div class='sec-head'><div><div class='eyebrow'>첨부파일</div><h3>첨부자료 ("+atts.length+"건)</h3></div>"+
     "<div class='row-actions'>"+
@@ -4194,6 +4274,7 @@ function renderBoardDetail(){
   "</div>";
 
   C.innerHTML = html;
+  bindInlineImageFallback(C);
 
   var attBox = C.querySelector("#bdAttBox");
   var fileIn = C.querySelector("#bdAttFile");
@@ -4295,8 +4376,13 @@ function renderBoardForm(){
     libBoardForm = isEdit
       ? { title: row.title || "", author: row.author || "", category: row.category || "", content: row.content || "" }
       : { title: "", author: "김진용", category: "", content: "" };
+    libBoardPending = [];   /* 폼을 처음 열 때만 초기화(재렌더 시에는 유지) */
   }
   var f = libBoardForm;
+
+  /* 글쓰기 화면에서 보여줄 첨부 목록: 수정 모드는 저장된 첨부, 신규는 보류 첨부 */
+  var formAtts = isEdit ? attRowsForProjectId(row.id) : libBoardPending;
+  var attDelKey = isEdit ? "data-bdf-att-del-saved" : "data-bdf-att-del-pending";
 
   var cats = LIB_CATS.slice();
   if (f.category && cats.indexOf(f.category) < 0) cats.push(f.category);
@@ -4317,6 +4403,30 @@ function renderBoardForm(){
         "</select></div>"+
       "</div>"+
       "<div class='fld'><label>내용</label><textarea id='bdfContent' rows='12' placeholder='내용을 입력하세요'>"+esc(f.content)+"</textarea></div>"+
+      "<div class='fld'>"+
+        "<div class='row-actions' style='justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px'>"+
+          "<label style='margin:0'>첨부파일</label>"+
+          "<button type='button' class='btn sm primary' data-bdf-att-add>📁 파일 첨부</button>"+
+        "</div>"+
+        "<input type='file' id='bdfAttFile' multiple accept='"+LIB_ACCEPT+"' style='display:none'>"+
+        "<div class='bd-form-drop' id='bdfAttBox'>"+
+          "<div class='att-drop-hint'>이 영역에 파일을 끌어다 놓거나 '📁 파일 첨부'를 누르세요</div>"+
+          (formAtts.length
+            ? "<div class='att-list-items' style='margin-top:10px'>"+
+                formAtts.map(function(att, aIdx){
+                  return "<div class='att-item-row'>"+
+                    "<div class='att-item-main'>"+
+                      boardAttBadge(att)+
+                      "<span class='att-item-name'>"+esc(att.name || "")+"</span>"+
+                      "<span class='att-item-meta tnum'>"+esc(att.size || "")+"</span>"+
+                    "</div>"+
+                    "<button type='button' class='att-item-del' "+attDelKey+"='"+aIdx+"' title='삭제'>🗑</button>"+
+                  "</div>";
+                }).join("")+
+              "</div>"
+            : "<div class='empty' style='margin-top:10px'>첨부된 파일이 없습니다.</div>")+
+        "</div>"+
+      "</div>"+
       "<div class='row-actions' style='justify-content:flex-end; gap:8px'>"+
         "<button type='button' class='btn ghost' data-bdf-cancel>취소</button>"+
         "<button type='button' class='btn primary' data-bdf-save>"+(isEdit ? "수정 저장" : "등록")+"</button>"+
@@ -4335,9 +4445,59 @@ function renderBoardForm(){
   if (cIn) cIn.onchange = function(){ libBoardForm.category = cIn.value; };
   if (xIn) xIn.oninput = function(){ libBoardForm.content = xIn.value; };
 
+  /* ---- 글쓰기 화면 첨부: 업로드 / 드래그앤드롭 / 삭제 ---- */
+  function bdfUpload(files){
+    if (isEdit){
+      handleFileUploadOrDrivePrompt(files, null, renderLibrary, row.id);
+    } else {
+      handleFileUploadOrDrivePrompt(files, libBoardPending, renderLibrary, null);
+    }
+  }
+
+  var attAddBtn = C.querySelector("[data-bdf-att-add]");
+  var attFileIn = C.querySelector("#bdfAttFile");
+  if (attAddBtn && attFileIn){
+    attAddBtn.onclick = function(){ attFileIn.click(); };
+    attFileIn.onchange = function(){
+      bdfUpload(attFileIn.files);
+      attFileIn.value = "";
+    };
+  }
+  setupDragAndDrop(C.querySelector("#bdfAttBox"), bdfUpload);
+
+  C.querySelectorAll("[data-bdf-att-del-saved]").forEach(function(b){
+    b.onclick = async function(){
+      var idx = parseInt(b.getAttribute("data-bdf-att-del-saved"), 10);
+      var ok = await confirmDlg("이 첨부파일을 삭제할까요?", "삭제", "첨부파일 삭제");
+      if (!ok) return;
+      deleteAttachmentItem(row.id, attRowsForProjectId(row.id), idx, row.title || "", renderLibrary);
+    };
+  });
+
+  C.querySelectorAll("[data-bdf-att-del-pending]").forEach(function(b){
+    b.onclick = async function(){
+      var idx = parseInt(b.getAttribute("data-bdf-att-del-pending"), 10);
+      var item = libBoardPending[idx];
+      if (!item) return;
+      var ok = await confirmDlg("이 첨부파일을 삭제할까요?", "삭제", "첨부파일 삭제");
+      if (!ok) return;
+      await discardOrphanDriveFile(item.gdrive_id || parseGoogleDriveFileId(item.url));
+      libBoardPending.splice(idx, 1);
+      renderLibrary();
+    };
+  });
+
   var cancelBtn = C.querySelector("[data-bdf-cancel]");
   if (cancelBtn){
-    cancelBtn.onclick = function(){
+    cancelBtn.onclick = async function(){
+      /* 저장하지 않고 나가면 미리 올려둔 드라이브 파일은 고아가 되므로 정리 */
+      if (libBoardPending.length){
+        for (var i = 0; i < libBoardPending.length; i++){
+          var it = libBoardPending[i];
+          await discardOrphanDriveFile(it.gdrive_id || parseGoogleDriveFileId(it.url));
+        }
+        libBoardPending = [];
+      }
       libBoardForm = null;
       libBoardView = isEdit ? "detail" : "list";
       renderLibrary();
@@ -4361,6 +4521,7 @@ function renderBoardForm(){
         var editId = libBoardId;
         await crud("PATCH", "board", editId, { title: title, author: author, category: category, content: content });
         libBoardForm = null;
+        libBoardPending = [];   /* 수정 모드는 첨부가 이미 글에 연결되어 있음 */
         libBoardId = editId;
         libBoardView = "detail";
         renderLibrary();
@@ -4379,6 +4540,12 @@ function renderBoardForm(){
           if (String(list[i].title || "") === title && String(list[i].date || "") === today){ newId = list[i].id; break; }
         }
       }
+      /* 글이 만들어진 직후, 미리 올려둔 첨부를 그 글 id로 연결한다 */
+      if (newId){
+        await flushPendingAttachments(newId, libBoardPending);
+      } else if (libBoardPending.length > 0){
+        await showAlertDlg("글은 저장되었지만 글 id를 확인하지 못해 첨부를 연결하지 못했습니다.", "첨부 연결 실패", false);
+      }
       libBoardForm = null;
       if (newId){
         libViewed[String(newId)] = 1;   /* 새 글은 조회수 증가 없음 */
@@ -4389,6 +4556,7 @@ function renderBoardForm(){
         libBoardView = "list";
         libBoardPage = 1;
       }
+      libBoardPending = [];
       renderLibrary();
     };
   }
@@ -4417,6 +4585,16 @@ function renderFileDetail(){
     "<div class='bd-meta'>"+esc(pName)+(pClient ? " · "+esc(pClient) : "")+" · "+esc(att.date || "-")+" · "+esc(att.size || "-")+"</div>"+
   "</div></section>";
 
+  if (attIsImage(att)){
+    var fileImgHtml = renderInlineImages([att]);
+    if (fileImgHtml){
+      html += "<section class='panel' style='margin-bottom:16px'>"+
+        "<div class='sec-head'><div><div class='eyebrow'>첨부 이미지</div><h3>이미지 미리보기</h3></div></div>"+
+        "<div class='panel-b'>"+fileImgHtml+"</div>"+
+      "</section>";
+    }
+  }
+
   html += "<section class='panel' style='margin-bottom:16px'>"+
     "<div class='sec-head'><div><div class='eyebrow'>파일 정보</div><h3>첨부 상세</h3></div></div><div class='panel-b'>"+
     "<div class='att-list-items'><div class='att-item-row'>"+
@@ -4440,6 +4618,7 @@ function renderFileDetail(){
   "</div>";
 
   C.innerHTML = html;
+  bindInlineImageFallback(C);
 
   var vBtn = C.querySelector("[data-lf-view]");
   if (vBtn) vBtn.onclick = function(){ openAttachmentPreview(att); };
