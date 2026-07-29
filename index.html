@@ -1340,7 +1340,9 @@ function uploadResultUrl(res){
   return res.downloadUrl || res.fileUrl || null;
 }
 
-/* 구글드라이브 업로드. 성공 시 {fileId, url}, 실패 시 예외를 던진다. */
+/* [폴백 전용] base64 경유 구글드라이브 업로드 (Apps Script가 파일을 대신 써준다).
+   느리므로 기본 경로가 아니라, 아래 직접 업로드가 실패했을 때만 사용한다.
+   성공 시 {fileId, url}, 실패 시 예외를 던진다. */
 async function uploadBase64ToDrive(fileName, mimeType, base64, onProgress){
   if (!base64) throw new Error("빈 파일입니다.");
   var mime = mimeType || "application/octet-stream";
@@ -1385,6 +1387,98 @@ async function uploadBase64ToDrive(fileName, mimeType, base64, onProgress){
   return { fileId: (last && last.fileId) || "", url: curl };
 }
 
+/* ============ 브라우저 → 구글드라이브 직접 전송 (재개 가능 업로드) ============
+   서버(Apps Script)는 업로드 세션만 발급하고, 파일 원본 바이트는 브라우저가
+   구글 업로드 엔드포인트로 곧장 PUT한다. base64 변환·중계가 없어 훨씬 빠르다.
+     1) driveInitUpload  → sessionUrl 발급
+     2) XHR PUT(File 그대로) → 드라이브 파일 id  (진행률 이벤트를 위해 fetch 대신 XHR)
+     3) driveFinalize    → 공유 링크(downloadUrl/fileUrl) 확보 */
+
+/* 진행률 콜백을 갖춘 PUT. Content-Type 헤더는 설정하지 않는다(세션이 이미 알고 있음). */
+function putFileToUploadSession(sessionUrl, file, onProgress){
+  return new Promise(function(resolve, reject){
+    var xhr = new XMLHttpRequest();
+    xhr.open("PUT", sessionUrl, true);
+    if (xhr.upload){
+      xhr.upload.onprogress = function(e){
+        if (!e || !e.lengthComputable || typeof onProgress !== "function") return;
+        var pct = Math.round((e.loaded / e.total) * 100);
+        if (pct > 99) pct = 99;   /* 100%는 드라이브 응답을 받은 뒤에만 */
+        if (pct < 0) pct = 0;
+        onProgress(pct);
+      };
+    }
+    xhr.onload = function(){
+      if (xhr.status < 200 || xhr.status >= 300){
+        reject(new Error("드라이브 전송 실패 (HTTP " + xhr.status + ")"));
+        return;
+      }
+      var j = null;
+      try { j = JSON.parse(xhr.responseText); } catch(e){ j = null; }
+      if (j && j.id) resolve(String(j.id));
+      else reject(new Error("드라이브 응답에 파일 ID가 없습니다."));
+    };
+    xhr.onerror   = function(){ reject(new Error("드라이브 전송 중 네트워크 오류")); };
+    xhr.onabort   = function(){ reject(new Error("드라이브 전송이 중단되었습니다.")); };
+    xhr.ontimeout = function(){ reject(new Error("드라이브 전송 시간 초과")); };
+    xhr.send(file);   /* File 객체 그대로 — base64 변환 없음 */
+  });
+}
+
+/* 업로드된 원본을 되돌릴 수 없을 때 남는 고아 파일 정리(실패해도 무시) */
+async function discardOrphanDriveFile(fileId){
+  if (!fileId) return;
+  try { await apiSend("POST", null, null, { action: "deleteDrive", fileId: fileId }); } catch(e){}
+}
+
+/* 직접 전송 경로. 성공 시 {fileId, url}. 실패 시 예외를 던지며,
+   err.noFallback === true 이면 base64 재시도를 하면 안 되는 단계(전송은 이미 끝난 뒤)를 뜻한다. */
+async function uploadFileToDriveDirect(file, onProgress){
+  var mime = file.type || "application/octet-stream";
+
+  /* 1) 세션 발급 — 실패하면 폴백 가능 */
+  var init = await apiSend("POST", null, null, {
+    action: "driveInitUpload",
+    fileName: file.name,
+    mimeType: mime,
+    folderId: ATT_FOLDER_ID
+  });
+  if (!init || init.fallback || !init.ok || !init.sessionUrl){
+    throw new Error("업로드 세션 발급 실패");
+  }
+
+  /* 2) 원본 바이트 PUT — 실패하면 폴백 가능 */
+  if (typeof onProgress === "function") onProgress(0);
+  var fileId = await putFileToUploadSession(init.sessionUrl, file, onProgress);
+
+  /* 3) 공유 전환 — 여기부터는 파일이 이미 드라이브에 올라가 있으므로
+        base64로 재시도하면 같은 파일이 중복 생성된다. 고아 파일만 지우고 정직하게 실패시킨다. */
+  var fin = await apiSend("POST", null, null, { action: "driveFinalize", fileId: fileId });
+  var url = (fin && !fin.fallback && fin.ok) ? (fin.downloadUrl || fin.fileUrl || null) : null;
+  if (!url){
+    await discardOrphanDriveFile(fileId);
+    var e1 = new Error("드라이브 공유 설정 실패");
+    e1.noFallback = true;
+    throw e1;
+  }
+  if (typeof onProgress === "function") onProgress(100);
+  return { fileId: (fin && fin.fileId) || fileId, url: url };
+}
+
+/* 업로드 진입점: 직접 전송을 먼저 시도하고, 세션 발급·전송 단계가 실패한 경우에만
+   기존 base64 방식으로 한 번 더 시도한다. 둘 다 실패하면 예외를 그대로 올린다. */
+async function uploadFileToDrive(file, onProgress){
+  try {
+    return await uploadFileToDriveDirect(file, onProgress);
+  } catch(err){
+    if (err && err.noFallback) throw err;
+    console.warn("직접 업로드 실패 → base64 방식으로 재시도:", (file && file.name), err);
+    if (typeof onProgress === "function") onProgress(0);
+    var base64 = await readFileAsBase64(file);
+    return await uploadBase64ToDrive(file.name, file.type, base64, onProgress);
+  }
+}
+
 /* 파일들을 드라이브에 올리고 성공한 것만 atts 테이블에 기록한다.
    projectId가 있으면 즉시 insert, 없으면(신규 프로젝트) pendingArr에 담아 저장 시점에 붙인다.
    base64 데이터URL은 어떤 경우에도 시트에 저장하지 않는다. */
@@ -1401,8 +1495,7 @@ async function addFilesToAtts(files, pendingArr, callback, projectId){
     var label = (total > 1 ? "(" + (idx + 1) + "/" + total + ") " : "") + f.name;
     showUploadToast("업로드 준비 중 · " + label, false);
     try {
-      var base64 = await readFileAsBase64(f);
-      var up = await uploadBase64ToDrive(f.name, f.type, base64, makeUploadProgress(label));
+      var up = await uploadFileToDrive(f, makeUploadProgress(label));
       var attObj = {
         name: f.name,
         type: getAttType(f.name, f.type),
