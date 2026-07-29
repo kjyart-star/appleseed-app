@@ -4112,10 +4112,9 @@ function renderBoardList(){
   var start = (libBoardPage - 1) * LIB_PER_PAGE;
   var pageItems = items.slice(start, start + LIB_PER_PAGE);
 
-  var html = pageHead("library", LIB_DESC,
-    "<button class='btn primary' data-bd-new>+ 글쓰기</button>"+
-    "<button class='btn ghost' id='libUploadBtn'>📁 파일 업로드</button>"+
-    "<input type='file' id='libFileInput' multiple accept='"+LIB_ACCEPT+"' style='display:none'>");
+  /* 파일 업로드는 글쓰기 화면에서 첨부로 처리하므로 상단 버튼은 두지 않는다.
+     글쓰기 버튼은 목록 아래(페이지네이션 옆)에 배치 — 일반적인 게시판 배치와 동일 */
+  var html = pageHead("library", LIB_DESC, "");
 
   html += "<div class='panel' style='margin-bottom:20px;'><div class='panel-b' style='display:flex; flex-wrap:wrap; gap:12px; align-items:center;'>"+
     "<input type='text' class='proj-search' id='bdSearchInput' placeholder='제목·작성자·내용·파일명·프로젝트 검색' value='"+esc(libBoardSearch)+"' style='flex:1; min-width:200px;'>"+
@@ -4125,7 +4124,7 @@ function renderBoardList(){
     "<h3>전체 ("+total+"건)</h3></div></div><div class='panel-b'>";
 
   if (!total){
-    html += "<div class='empty'>"+(q ? "검색 결과가 없습니다." : "등록된 자료가 없습니다.<br>상단 '글쓰기'로 글을 쓰거나 '파일 업로드'로 자료를 추가해보세요.")+"</div>";
+    html += "<div class='empty'>"+(q ? "검색 결과가 없습니다." : "등록된 자료가 없습니다.<br>아래 '글쓰기'로 자료를 등록해보세요. (글 작성 화면에서 파일을 첨부합니다)")+"</div>";
   } else {
     html += "<div class='tbl-scroll'><table><thead><tr><th class='c'>번호</th><th>제목</th>"+
       "<th class='c'>작성자</th><th class='c'>날짜</th><th class='c'>조회</th></tr></thead><tbody>";
@@ -4175,6 +4174,9 @@ function renderBoardList(){
       html += "<button class='proj-chip' data-bd-page='"+pages+"'>끝 »</button></div>";
     }
   }
+  /* 글쓰기 버튼: 목록 아래 오른쪽 (일반적인 게시판 배치) */
+  html += "<div style='display:flex; justify-content:flex-end; margin-top:14px'>"+
+    "<button class='btn primary' data-bd-new>+ 글쓰기</button></div>";
   html += "</div></section>";
 
   C.innerHTML = html;
