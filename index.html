@@ -3862,15 +3862,10 @@ function renderGov(){
   load(false);
 }
 
-/* ============ 자료실 ============ */
-var libSearch = "";
-var libProjectFilter = "전체";
-var libTypeFilter = "전체";
-var libFilesFocus = false;
-
-var libTab = "board";            /* "board" | "files" */
-var libBoardView = "list";       /* "list" | "detail" | "form" */
+/* ============ 자료실 (게시판 + 프로젝트 첨부파일 통합) ============ */
+var libBoardView = "list";       /* "list" | "detail" | "form" | "file" */
 var libBoardId = null;
+var libFileId = null;
 var libBoardSearch = "";
 var libBoardPage = 1;
 var libBoardForm = null;
@@ -3879,23 +3874,7 @@ var libBoardFocus = false;
 var LIB_PER_PAGE = 15;
 var LIB_CATS = ["교육자료", "제안서", "참고자료", "기타"];
 var LIB_ACCEPT = "image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip";
-
-function libTabsHtml(){
-  return "<div class='proj-chips' style='margin-bottom:16px'>"+
-    "<button class='proj-chip"+(libTab==="board"?" on":"")+"' data-lib-tab='board'>게시판</button>"+
-    "<button class='proj-chip"+(libTab==="files"?" on":"")+"' data-lib-tab='files'>프로젝트 자료</button>"+
-  "</div>";
-}
-
-function bindLibTabs(){
-  C.querySelectorAll("[data-lib-tab]").forEach(function(b){
-    b.onclick = function(){
-      libTab = b.getAttribute("data-lib-tab");
-      libBoardView = "list";
-      renderLibrary();
-    };
-  });
-}
+var LIB_DESC = "사내 공지·자료 게시글과 프로젝트 첨부파일을 한 게시판에서 통합 관리";
 
 function boardRows(){
   return (state.data && Array.isArray(state.data.board)) ? state.data.board : [];
@@ -3924,32 +3903,105 @@ function restoreSearchFocus(input){
   }catch(e){}
 }
 
+/* atts 테이블에서 id로 첨부 1건 찾기 */
+function libAttFindById(id){
+  if (id == null) return null;
+  var all = (state.data && Array.isArray(state.data.atts)) ? state.data.atts : [];
+  for (var i = 0; i < all.length; i++){
+    if (all[i] && String(all[i].id) === String(id)) return all[i];
+  }
+  return null;
+}
+
+function libProjectById(pid){
+  if (pid == null) return null;
+  var ps = (state.data && Array.isArray(state.data.projects)) ? state.data.projects : [];
+  for (var i = 0; i < ps.length; i++){
+    if (ps[i] && String(ps[i].id) === String(pid)) return ps[i];
+  }
+  return null;
+}
+
+/* 게시글 + 프로젝트 첨부파일을 하나의 목록으로 합친다.
+   att.project_id 가 프로젝트 id 인 행만 파일 항목으로 넣는다.
+   (게시글 첨부는 project_id 가 글 id 이므로 제외 — 글 행에 첨부수로 이미 표시됨) */
+function libUnifiedItems(){
+  var items = [];
+  var rows = boardRows();
+  rows.forEach(function(r, i){
+    items.push({ kind: "post", row: r, seq: i, date: String(r.date || "") });
+  });
+
+  var ps = (state.data && Array.isArray(state.data.projects)) ? state.data.projects : [];
+  var pmap = {};
+  ps.forEach(function(p){ if (p && p.id != null) pmap[String(p.id)] = p; });
+
+  var all = (state.data && Array.isArray(state.data.atts)) ? state.data.atts : [];
+  all.forEach(function(a, i){
+    if (!a || a.project_id == null || a.project_id === "") return;
+    var p = pmap[String(a.project_id)];
+    if (!p) return;
+    items.push({
+      kind: "file", att: a, project: p,
+      projectName: p.name || "미지정 프로젝트",
+      client: p.client || "",
+      seq: rows.length + i,
+      date: String(a.date || "")
+    });
+  });
+  return items;
+}
+
 function renderLibrary(){
-  if (libTab === "files") { renderLibraryFiles(); return; }
+  if (libBoardView === "file") { renderFileDetail(); return; }
   if (libBoardView === "detail") { renderBoardDetail(); return; }
   if (libBoardView === "form") { renderBoardForm(); return; }
   renderBoardList();
 }
 
-/* ---- 게시판: 목록 ---- */
+/* 자료실에서 바로 파일만 올리는 버튼(프로젝트 선택 후 업로드) */
+function bindLibUploadButton(){
+  var uploadBtn = C.querySelector("#libUploadBtn");
+  var fileInput = C.querySelector("#libFileInput");
+  if (!uploadBtn || !fileInput) return;
+  uploadBtn.onclick = function(){
+    var projects = (state.data && Array.isArray(state.data.projects)) ? state.data.projects : [];
+    if (!projects.length){ alert("등록된 프로젝트가 없습니다."); return; }
+    var pSelName = prompt("파일을 추가할 프로젝트명을 선택하세요:\n" + projects.map(function(p){ return "- " + p.name; }).join("\n"), projects[0].name);
+    if (!pSelName) return;
+    var targetP = projects.find(function(p){ return p.name === pSelName || String(p.name || "").indexOf(pSelName) >= 0; });
+    if (!targetP){ alert("존재하지 않는 프로젝트입니다."); return; }
+    fileInput.onchange = function(){
+      handleFileUploadOrDrivePrompt(fileInput.files, null, renderLibrary, targetP.id);
+      fileInput.value = "";
+    };
+    fileInput.click();
+  };
+}
+
+/* ---- 자료실: 통합 목록 (게시글 + 프로젝트 첨부파일) ---- */
 function renderBoardList(){
-  var rows = boardRows();
-  var items = rows.map(function(r, i){ return { row: r, idx: i }; });
+  var items = libUnifiedItems();
 
   var q = String(libBoardSearch || "").trim().toLowerCase();
   if (q){
     items = items.filter(function(it){
-      var r = it.row;
-      return String(r.title || "").toLowerCase().indexOf(q) >= 0 ||
-             String(r.author || "").toLowerCase().indexOf(q) >= 0 ||
-             String(r.content || "").toLowerCase().indexOf(q) >= 0;
+      if (it.kind === "post"){
+        var r = it.row;
+        return String(r.title || "").toLowerCase().indexOf(q) >= 0 ||
+               String(r.author || "").toLowerCase().indexOf(q) >= 0 ||
+               String(r.content || "").toLowerCase().indexOf(q) >= 0;
+      }
+      return String(it.att.name || "").toLowerCase().indexOf(q) >= 0 ||
+             String(it.projectName || "").toLowerCase().indexOf(q) >= 0 ||
+             String(it.client || "").toLowerCase().indexOf(q) >= 0;
     });
   }
 
   items.sort(function(a, b){
-    var da = String(a.row.date || ""), db = String(b.row.date || "");
+    var da = a.date, db = b.date;
     if (da !== db) return da < db ? 1 : -1;
-    return b.idx - a.idx;
+    return b.seq - a.seq;
   });
 
   var total = items.length;
@@ -3959,25 +4011,41 @@ function renderBoardList(){
   var start = (libBoardPage - 1) * LIB_PER_PAGE;
   var pageItems = items.slice(start, start + LIB_PER_PAGE);
 
-  var html = pageHead("library", "사내 공지·자료 게시판과 전사 프로젝트 첨부자료 통합 관리",
-    "<button class='btn primary' data-bd-new>+ 글쓰기</button>");
-  html += libTabsHtml();
+  var html = pageHead("library", LIB_DESC,
+    "<button class='btn primary' data-bd-new>+ 글쓰기</button>"+
+    "<button class='btn ghost' id='libUploadBtn'>📁 파일 업로드</button>"+
+    "<input type='file' id='libFileInput' multiple accept='"+LIB_ACCEPT+"' style='display:none'>");
 
   html += "<div class='panel' style='margin-bottom:20px;'><div class='panel-b' style='display:flex; flex-wrap:wrap; gap:12px; align-items:center;'>"+
-    "<input type='text' class='proj-search' id='bdSearchInput' placeholder='제목·작성자·내용 검색' value='"+esc(libBoardSearch)+"' style='flex:1; min-width:200px;'>"+
+    "<input type='text' class='proj-search' id='bdSearchInput' placeholder='제목·작성자·내용·파일명·프로젝트 검색' value='"+esc(libBoardSearch)+"' style='flex:1; min-width:200px;'>"+
     "</div></div>";
 
-  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>게시판</div>"+
-    "<h3>전체 글 ("+total+"건)</h3></div></div><div class='panel-b'>";
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>자료실</div>"+
+    "<h3>전체 ("+total+"건)</h3></div></div><div class='panel-b'>";
 
   if (!total){
-    html += "<div class='empty'>"+(q ? "검색 결과가 없습니다." : "등록된 글이 없습니다.<br>상단 '글쓰기' 버튼으로 첫 글을 작성해보세요.")+"</div>";
+    html += "<div class='empty'>"+(q ? "검색 결과가 없습니다." : "등록된 자료가 없습니다.<br>상단 '글쓰기'로 글을 쓰거나 '파일 업로드'로 자료를 추가해보세요.")+"</div>";
   } else {
     html += "<div class='tbl-scroll'><table><thead><tr><th class='c'>번호</th><th>제목</th>"+
       "<th class='c'>작성자</th><th class='c'>날짜</th><th class='c'>조회</th></tr></thead><tbody>";
     pageItems.forEach(function(it, i){
-      var r = it.row;
       var no = total - (start + i);
+      if (it.kind === "file"){
+        var att = it.att;
+        html += "<tr class='bd-row' data-bd-file='"+esc(att.id)+"' style='cursor:pointer'>"+
+          "<td class='c tnum'>"+no+"</td>"+
+          "<td>"+
+            "<span style='margin-right:6px'>📎</span>"+
+            "<span class='att-badge file' style='margin-right:6px'>"+esc(it.projectName)+"</span>"+
+            "<span style='font-weight:600'>"+esc(att.name || "(파일명 없음)")+"</span>"+
+          "</td>"+
+          "<td class='c'>파일</td>"+
+          "<td class='c tnum'>"+esc(att.date || "")+"</td>"+
+          "<td class='c tnum'>-</td>"+
+        "</tr>";
+        return;
+      }
+      var r = it.row;
       var cat = String(r.category || "");
       var nAtt = attRowsForProjectId(r.id).length;
       html += "<tr class='bd-row' data-bd-open='"+esc(r.id)+"' style='cursor:pointer'>"+
@@ -4009,7 +4077,7 @@ function renderBoardList(){
   html += "</div></section>";
 
   C.innerHTML = html;
-  bindLibTabs();
+  bindLibUploadButton();
 
   var newBtn = C.querySelector("[data-bd-new]");
   if (newBtn){
@@ -4041,6 +4109,15 @@ function renderBoardList(){
     };
   });
 
+  C.querySelectorAll("[data-bd-file]").forEach(function(tr){
+    tr.onclick = function(e){
+      if (e && e.target && e.target.closest && (e.target.closest("button") || e.target.closest(".row-actions"))) return;
+      libFileId = tr.getAttribute("data-bd-file");
+      libBoardView = "file";
+      renderLibrary();
+    };
+  });
+
   C.querySelectorAll("[data-bd-page]").forEach(function(b){
     b.onclick = function(){
       libBoardPage = parseInt(b.getAttribute("data-bd-page"), 10) || 1;
@@ -4068,8 +4145,7 @@ function renderBoardDetail(){
   var atts = attRowsForProjectId(row.id);
   var cat = String(row.category || "");
 
-  var html = pageHead("library", "사내 공지·자료 게시판과 전사 프로젝트 첨부자료 통합 관리", "");
-  html += libTabsHtml();
+  var html = pageHead("library", LIB_DESC, "");
 
   html += "<section class='panel' style='margin-bottom:16px'><div class='panel-b'>"+
     "<div class='bd-head'>"+
@@ -4118,7 +4194,6 @@ function renderBoardDetail(){
   "</div>";
 
   C.innerHTML = html;
-  bindLibTabs();
 
   var attBox = C.querySelector("#bdAttBox");
   var fileIn = C.querySelector("#bdAttFile");
@@ -4226,8 +4301,7 @@ function renderBoardForm(){
   var cats = LIB_CATS.slice();
   if (f.category && cats.indexOf(f.category) < 0) cats.push(f.category);
 
-  var html = pageHead("library", "사내 공지·자료 게시판과 전사 프로젝트 첨부자료 통합 관리", "");
-  html += libTabsHtml();
+  var html = pageHead("library", LIB_DESC, "");
 
   html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>게시판</div>"+
     "<h3>"+(isEdit ? "글 수정" : "새 글 작성")+"</h3></div></div><div class='panel-b'>"+
@@ -4251,7 +4325,6 @@ function renderBoardForm(){
   "</div></section>";
 
   C.innerHTML = html;
-  bindLibTabs();
 
   var tIn = C.querySelector("#bdfTitle");
   var aIn = C.querySelector("#bdfAuthor");
@@ -4321,140 +4394,88 @@ function renderBoardForm(){
   }
 }
 
-/* ---- 프로젝트 자료 (기존 통합 보기) ---- */
-function renderLibraryFiles(){
-  var projects = state.data.projects || [];
-  var allAtts = [];
-
-  projects.forEach(function(p){
-    var atts = getProjectAttachments(p);
-    atts.forEach(function(att){
-      allAtts.push({
-        att: att,
-        project: p,
-        projectName: p.name || "미지정 프로젝트",
-        client: p.client || ""
-      });
-    });
-  });
-
-  var html = pageHead("library", "전사 프로젝트 첨부자료 통합 관리 (업로드 · 보기 · 다운로드 · 삭제)",
-    "<button class='btn primary' id='libUploadBtn'>+ 자료실 파일 업로드</button>"+
-    "<input type='file' id='libFileInput' multiple accept='image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip' style='display:none'>");
-  html += libTabsHtml();
-
-  html += "<div class='panel' style='margin-bottom:20px;'><div class='panel-b' style='display:flex; flex-wrap:wrap; gap:12px; align-items:center;'>"+
-    "<input type='text' class='proj-search' id='libSearchInput' placeholder='파일명·프로젝트·고객사 검색' value='"+esc(libSearch)+"' style='flex:1; min-width:200px;'>"+
-    "<select id='libProjectSelect' class='btn sm ghost' style='height:36px; padding:0 10px;'>"+
-      "<option value='전체'>전체 프로젝트</option>"+
-      projects.map(function(p){ return "<option value='"+esc(p.name)+"' "+(libProjectFilter===p.name?"selected":"")+">"+esc(p.name)+"</option>"; }).join("")+
-    "</select>"+
-    "<select id='libTypeSelect' class='btn sm ghost' style='height:36px; padding:0 10px;'>"+
-      "<option value='전체' "+(libTypeFilter==="전체"?"selected":"")+">전체 유형</option>"+
-      "<option value='pdf' "+(libTypeFilter==="pdf"?"selected":"")+">PDF 문서</option>"+
-      "<option value='image' "+(libTypeFilter==="image"?"selected":"")+">이미지</option>"+
-      "<option value='link' "+(libTypeFilter==="link"?"selected":"")+">외부 링크</option>"+
-    "</select>"+
-    "</div></div>";
-
-  var filtered = allAtts.filter(function(item){
-    if (libProjectFilter !== "전체" && item.projectName !== libProjectFilter) return false;
-    if (libTypeFilter !== "전체" && (item.att.type || "file").toLowerCase() !== libTypeFilter) return false;
-    if (!libSearch) return true;
-    var q = libSearch.toLowerCase();
-    return (item.att.name || "").toLowerCase().indexOf(q) >= 0 ||
-           (item.projectName || "").toLowerCase().indexOf(q) >= 0 ||
-           (item.client || "").toLowerCase().indexOf(q) >= 0;
-  });
-
-  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>자료실 목록</div>"+
-    "<h3>전사 통합 파일 ("+filtered.length+"건)</h3></div></div><div class='panel-b'>";
-
-  if (!filtered.length){
-    html += "<div class='empty'>조건에 맞는 자료가 없습니다.<br>상단 '+ 자료실 파일 업로드' 버튼으로 파일을 추가하세요.</div>";
-  } else {
-    html += "<div class='tbl-scroll'><table><thead><tr><th>프로젝트</th><th>파일명</th><th>유형</th><th>용량</th><th>등록일</th><th class='r'>작업</th></tr></thead><tbody>";
-    filtered.forEach(function(item, idx){
-      var att = item.att;
-      var badge = (att.type || "file").toLowerCase();
-      var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "link" ? "링크" : "파일";
-      html += "<tr>"+
-        "<td><b>"+esc(item.projectName)+"</b><br><small style='color:var(--ink-3)'>"+esc(item.client)+"</small></td>"+
-        "<td><span style='font-weight:600'>"+esc(att.name||"")+"</span></td>"+
-        "<td><span class='att-badge "+badge+"'>"+bLabel+"</span></td>"+
-        "<td class='tnum'>"+esc(att.size||"")+"</td>"+
-        "<td class='tnum'>"+esc(att.date||"")+"</td>"+
-        "<td class='r'><div class='row-actions' style='justify-content:flex-end;'>"+
-          "<button type='button' class='btn sm primary' data-lib-view='"+idx+"'>👁️ 보기</button>"+
-          "<button type='button' class='btn sm ghost' data-lib-dl='"+idx+"'>💾 다운로드</button>"+
-          "<button type='button' class='icon-btn del' data-lib-del='"+idx+"' title='삭제'>🗑</button>"+
-        "</div></td>"+
-      "</tr>";
-    });
-    html += "</tbody></table></div>";
+/* ---- 자료실: 파일 1건 상세 ---- */
+function renderFileDetail(){
+  var att = libAttFindById(libFileId);
+  if (!att){
+    libBoardView = "list";
+    libFileId = null;
+    renderBoardList();
+    return;
   }
-  html += "</div></section>";
+  var proj = libProjectById(att.project_id);
+  var pName = proj ? (proj.name || "미지정 프로젝트") : "미지정 프로젝트";
+  var pClient = proj ? String(proj.client || "") : "";
+
+  var html = pageHead("library", LIB_DESC, "");
+
+  html += "<section class='panel' style='margin-bottom:16px'><div class='panel-b'>"+
+    "<div class='bd-head'>"+
+      boardAttBadge(att)+
+      "<h3 class='bd-title'>📎 "+esc(att.name || "(파일명 없음)")+"</h3>"+
+    "</div>"+
+    "<div class='bd-meta'>"+esc(pName)+(pClient ? " · "+esc(pClient) : "")+" · "+esc(att.date || "-")+" · "+esc(att.size || "-")+"</div>"+
+  "</div></section>";
+
+  html += "<section class='panel' style='margin-bottom:16px'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>파일 정보</div><h3>첨부 상세</h3></div></div><div class='panel-b'>"+
+    "<div class='att-list-items'><div class='att-item-row'>"+
+      "<div class='att-item-main'>"+
+        boardAttBadge(att)+
+        "<span class='att-item-name'>"+esc(att.name || "")+"</span>"+
+        "<span class='att-item-meta tnum'>"+esc(att.size || "")+"</span>"+
+        "<span class='att-item-meta tnum'>"+esc(att.date || "")+"</span>"+
+      "</div>"+
+      "<div class='row-actions'>"+
+        "<button type='button' class='btn sm primary' data-lf-view>👁️ 보기</button>"+
+        "<button type='button' class='btn sm ghost' data-lf-dl>💾 다운로드</button>"+
+      "</div>"+
+    "</div></div>"+
+    "<div style='margin-top:12px;color:var(--ink-3);font-size:13px'>소속 프로젝트: <b>"+esc(pName)+"</b></div>"+
+  "</div></section>";
+
+  html += "<div class='row-actions' style='justify-content:flex-end; gap:8px; margin-bottom:24px'>"+
+    "<button type='button' class='btn ghost' data-lf-list>목록</button>"+
+    "<button type='button' class='btn primary danger' data-lf-del>삭제</button>"+
+  "</div>";
 
   C.innerHTML = html;
-  bindLibTabs();
 
-  var uploadBtn = document.getElementById("libUploadBtn");
-  var fileInput = document.getElementById("libFileInput");
-  if (uploadBtn && fileInput){
-    uploadBtn.onclick = function(){
-      if (!projects.length){ alert("등록된 프로젝트가 없습니다."); return; }
-      var pSelName = prompt("파일을 추가할 프로젝트명을 선택하세요:\n" + projects.map(function(p){ return "- " + p.name; }).join("\n"), projects[0].name);
-      if (!pSelName) return;
-      var targetP = projects.find(function(p){ return p.name === pSelName || p.name.indexOf(pSelName) >= 0; });
-      if (!targetP){ alert("존재하지 않는 프로젝트입니다."); return; }
+  var vBtn = C.querySelector("[data-lf-view]");
+  if (vBtn) vBtn.onclick = function(){ openAttachmentPreview(att); };
 
-      fileInput.onchange = function(){
-        handleFileUploadOrDrivePrompt(fileInput.files, null, renderLibrary, targetP.id);
-        fileInput.value = "";
-      };
-      fileInput.click();
-    };
-  }
+  var dBtn = C.querySelector("[data-lf-dl]");
+  if (dBtn) dBtn.onclick = function(){ downloadAttachment(att); };
 
-  var sIn = document.getElementById("libSearchInput");
-  if (sIn){
-    sIn.oninput = function(){ libSearch = sIn.value; libFilesFocus = true; renderLibrary(); };
-    if (libFilesFocus){ libFilesFocus = false; restoreSearchFocus(sIn); }
-  }
+  var lBtn = C.querySelector("[data-lf-list]");
+  if (lBtn) lBtn.onclick = function(){
+    libBoardView = "list";
+    libFileId = null;
+    renderLibrary();
+  };
 
-  var pSel = document.getElementById("libProjectSelect");
-  if (pSel){ pSel.onchange = function(){ libProjectFilter = pSel.value; renderLibrary(); }; }
-
-  var tSel = document.getElementById("libTypeSelect");
-  if (tSel){ tSel.onchange = function(){ libTypeFilter = tSel.value; renderLibrary(); }; }
-
-  C.querySelectorAll("[data-lib-view]").forEach(function(b){
-    b.onclick = function(){
-      var idx = parseInt(b.getAttribute("data-lib-view"), 10);
-      openAttachmentPreview(filtered[idx].att);
-    };
-  });
-
-  C.querySelectorAll("[data-lib-dl]").forEach(function(b){
-    b.onclick = function(){
-      var idx = parseInt(b.getAttribute("data-lib-dl"), 10);
-      downloadAttachment(filtered[idx].att);
-    };
-  });
-
-  C.querySelectorAll("[data-lib-del]").forEach(function(b){
-    b.onclick = async function(){
-      var idx = parseInt(b.getAttribute("data-lib-del"), 10);
-      var item = filtered[idx];
-      var ok = await confirmDlg("'" + item.att.name + "' 첨부자료를 온라인에서 삭제할까요?", "삭제", "자료실 삭제");
+  var xBtn = C.querySelector("[data-lf-del]");
+  if (xBtn){
+    xBtn.onclick = async function(){
+      var ok = await confirmDlg("'" + (att.name || "") + "' 파일을 삭제할까요? 구글드라이브 원본도 함께 삭제됩니다.", "삭제", "파일 삭제");
       if (!ok) return;
-      var curAtts = getProjectAttachments(item.project);
-      var attIdx = curAtts.findIndex(function(a){ return a.id === item.att.id || a.name === item.att.name; });
-      if (attIdx >= 0){
-        deleteAttachmentItem(item.project.id, curAtts, attIdx, item.projectName, renderLibrary);
+      var curAtts = attRowsForProjectId(att.project_id);
+      var idx = -1;
+      for (var i = 0; i < curAtts.length; i++){
+        if (String(curAtts[i].id) === String(att.id)){ idx = i; break; }
       }
+      if (idx < 0){
+        libBoardView = "list";
+        libFileId = null;
+        renderLibrary();
+        return;
+      }
+      await deleteAttachmentItem(att.project_id, curAtts, idx, pName, null);
+      libBoardView = "list";
+      libFileId = null;
+      renderLibrary();
     };
-  });
+  }
 }
 
 var ROUTES = {
