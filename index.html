@@ -1138,6 +1138,8 @@ async function crud(method, table, id, body){
   }
   /* 진짜 낙관적 반영: 서버 응답을 기다리지 않고 화면부터 즉시 갱신 (실패 시 원복) */
   lastMutationAt = Date.now();   /* 이 시각 이전에 시작된 조회 응답은 폐기됨 */
+  /* 해당 테이블이 아직 로드되지 않았어도(예: 새로 추가된 atts) 즉시 반영되도록 배열을 만들어 둔다 */
+  if (state.data && table && !state.data[table]) state.data[table] = [];
   var list = state.data && state.data[table];
   var backup = list ? list.slice() : null;
   var tempId = null, resolvePending = null;
