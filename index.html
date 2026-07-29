@@ -4174,10 +4174,10 @@ function renderBoardList(){
       html += "<button class='proj-chip' data-bd-page='"+pages+"'>끝 »</button></div>";
     }
   }
-  /* 글쓰기 버튼: 목록 아래 오른쪽 (일반적인 게시판 배치) */
-  html += "<div style='display:flex; justify-content:flex-end; margin-top:14px'>"+
-    "<button class='btn primary' data-bd-new>+ 글쓰기</button></div>";
   html += "</div></section>";
+  /* 글쓰기 버튼: 패널 바깥 오른쪽 — 상세 화면의 목록·수정·삭제 버튼과 동일한 위치 */
+  html += "<div style='display:flex; justify-content:flex-end; gap:8px; margin-top:14px'>"+
+    "<button class='btn primary' data-bd-new>+ 글쓰기</button></div>";
 
   C.innerHTML = html;
   bindLibUploadButton();
