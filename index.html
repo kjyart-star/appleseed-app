@@ -3925,14 +3925,40 @@ function attIsPdf(att){
 }
 
 /* 화면에 바로 그릴 수 있는 이미지 주소. 없으면 null */
+/* 드라이브 이미지는 구글이 외부 사이트 직링크(thumbnail·uc·lh3)를 차단하므로
+   서버(action=driveImage)를 통해 받아 data: URL 로 표시한다. 받은 뒤에는 캐시. */
+var driveImgCache = {};
 function attImageSrc(att){
   if (!att) return null;
   var url = String(att.url || "");
-  var id = att.gdrive_id || parseGoogleDriveFileId(url);
-  if (id) return "https://drive.google.com/thumbnail?id=" + id + "&sz=w1000";
   if (url.indexOf("data:") === 0) return url;
+  var id = att.gdrive_id || parseGoogleDriveFileId(url);
+  if (id) return driveImgCache[id] || null;   /* 아직 못 받았으면 null → 로드 후 채움 */
   if (/^https?:\/\//i.test(url)) return url;
   return null;
+}
+/* 화면에 그려진 드라이브 이미지들을 서버에서 받아 채워 넣는다 */
+function loadDriveImages(root){
+  var r = root || C;
+  if (!r || !r.querySelectorAll) return;
+  var imgs = r.querySelectorAll("[data-drive-img]");
+  for (var i = 0; i < imgs.length; i++){
+    (function(im){
+      var id = im.getAttribute("data-drive-img");
+      if (!id) return;
+      if (driveImgCache[id]){ im.src = driveImgCache[id]; return; }
+      apiSend("POST", null, null, { action: "driveImage", fileId: id }).then(function(res){
+        if (res && res.ok && res.data){
+          driveImgCache[id] = "data:" + (res.mimeType || "image/png") + ";base64," + res.data;
+          im.src = driveImgCache[id];
+        } else {
+          var w = im.parentNode; if (w) w.style.display = "none";
+        }
+      }).catch(function(){
+        var w = im.parentNode; if (w) w.style.display = "none";
+      });
+    })(imgs[i]);
+  }
 }
 
 /* 이미지 첨부만 골라 세로로 나열하는 HTML. 대상이 없으면 빈 문자열 */
@@ -3943,10 +3969,13 @@ function renderInlineImages(atts){
     var a = arr[i];
     if (!attIsImage(a)) continue;
     var src = attImageSrc(a);
-    if (!src) continue;
+    var did = a.gdrive_id || parseGoogleDriveFileId(String(a.url || ""));
+    /* 드라이브 파일은 src 를 비워 두고 data-drive-img 로 표시 → loadDriveImages 가 채운다 */
+    if (!src && !did) continue;
     var nm = esc(a.name || "");
     out += "<figure class='bd-img-wrap'>"+
-      "<img class='bd-img-el' src=\""+esc(src)+"\" alt=\""+nm+"\">"+
+      "<img class='bd-img-el'"+(src ? " src=\""+esc(src)+"\"" : "")+
+        (did ? " data-drive-img=\""+esc(did)+"\"" : "")+" alt=\""+nm+"\">"+
       "<figcaption class='bd-img-cap'>"+nm+"</figcaption>"+
     "</figure>";
   }
@@ -3957,6 +3986,7 @@ function renderInlineImages(atts){
 function bindInlineImageFallback(root){
   var r = root || C;
   if (!r || !r.querySelectorAll) return;
+  loadDriveImages(r);            /* 드라이브 이미지는 서버에서 받아 채운다 */
   var imgs = r.querySelectorAll(".bd-img-el");
   for (var i = 0; i < imgs.length; i++){
     (function(im){
