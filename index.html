@@ -3061,6 +3061,13 @@ function mountProjectWorkspace(container){
   drawList(); drawDetail(); drawRail(); drawSubs();
 }
 
+/* 첨부 추가·삭제 후 화면 갱신.
+   drawDetail() 은 프로젝트 워크스페이스 내부 함수라 이 스코프에서는 보이지 않으므로
+   전역 재렌더(render)로 처리한다. 첨부 대화상자는 body 직속이라 닫히지 않는다. */
+function refreshAfterAtt(){
+  try { render(); } catch(err){ /* 렌더 실패는 첨부 저장 결과에 영향 없음 */ }
+}
+
 function openQuickAttachmentDialog(p){
   /* atts 테이블이 원본 — 렌더링할 때마다 최신 목록을 다시 읽는다 */
   var curAtts = getProjectAttachments(p);
@@ -3094,7 +3101,7 @@ function openQuickAttachmentDialog(p){
 
   if (qFormBox){
     setupDragAndDrop(qFormBox, function(files){
-      handleFileUploadOrDrivePrompt(files, null, function(){ renderQList(); drawDetail(); }, p.id);
+      handleFileUploadOrDrivePrompt(files, null, function(){ renderQList(); refreshAfterAtt(); }, p.id);
     });
   }
 
@@ -3135,7 +3142,7 @@ function openQuickAttachmentDialog(p){
         var i = parseInt(b.getAttribute("data-qdel"), 10);
         deleteAttachmentItem(p.id, curAtts, i, p.name, function(){
           renderQList();
-          drawDetail();
+          refreshAfterAtt();
         });
       };
     });
@@ -3145,7 +3152,7 @@ function openQuickAttachmentDialog(p){
   qFileInput.onchange = function(){
     var files = qFileInput.files;
     if (files && files.length){
-      handleFileUploadOrDrivePrompt(files, null, function(){ renderQList(); drawDetail(); }, p.id);
+      handleFileUploadOrDrivePrompt(files, null, function(){ renderQList(); refreshAfterAtt(); }, p.id);
     }
     qFileInput.value = "";
   };
@@ -3158,7 +3165,7 @@ function openQuickAttachmentDialog(p){
     var nowStr = seoulNow().toISOString().slice(0,10);
     insertAttachmentRow(p.id, {
       name: title.trim(), type: 'link', url: u, size: '링크', date: nowStr, gdrive_id: ""
-    }).then(function(){ renderQList(); drawDetail(); });
+    }).then(function(){ renderQList(); refreshAfterAtt(); });
   };
 
   renderQList();
@@ -3166,9 +3173,7 @@ function openQuickAttachmentDialog(p){
   /* 첨부는 추가·삭제 즉시 atts 테이블에 반영되므로 저장 버튼은 닫기 역할만 한다 */
   bg.querySelector("#qSave").onclick = function(){
     bg.remove();
-    try {
-      drawDetail();
-    } catch(err){}
+    refreshAfterAtt();
   };
   bg.onclick = function(e){
     if (e.target === bg) bg.remove();
