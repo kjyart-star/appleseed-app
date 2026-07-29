@@ -1443,7 +1443,9 @@ async function uploadFileToDriveDirect(file, onProgress){
     action: "driveInitUpload",
     fileName: file.name,
     mimeType: mime,
-    folderId: ATT_FOLDER_ID
+    folderId: ATT_FOLDER_ID,
+    /* 이 출처를 세션 생성 시 구글에 알려야 브라우저에서 직접 PUT 할 때 CORS 가 허용된다 */
+    origin: location.origin
   });
   if (!init || init.fallback || !init.ok || !init.sessionUrl){
     throw new Error("업로드 세션 발급 실패");
