@@ -978,170 +978,77 @@ function applyTombstones(d){
   }
   return d;
 }
-function extractAttachmentsFromProject(p){
-  if (!p) return { nextAction: "", attachments: [] };
-  var rawAction = p.next_action || "";
-  var atts = [];
-  var cleanAction = rawAction;
-  
-  if (rawAction.indexOf("[ATTS:") >= 0){
-    var parts = rawAction.split("[ATTS:");
-    cleanAction = parts[0].trim();
-    var jsonPart = parts[1].split("]")[0];
-    try {
-      var parsed = JSON.parse(jsonPart);
-      if (parsed && Array.isArray(parsed.attachments)){
-        atts = parsed.attachments;
-      }
-    } catch(e){}
-  }
-  
-  if (!atts.length){
-    if (Array.isArray(p.attachments) && p.attachments.length > 0) atts = p.attachments;
-    else if (typeof p.attachments === "string" && p.attachments.trim()){
-      try { atts = JSON.parse(p.attachments); } catch(e){}
-    }
-  }
-  
-  /* 삼중 보존 구조: 새로고침 또는 서버 동기화 지연 시에도 영구 보존 */
-  if (!atts.length && p.id != null){
-    var s1 = localStorage.getItem("appleseed_project_atts_id_" + p.id) || localStorage.getItem("appleseed_atts_id_" + p.id);
-    if (s1){ try { atts = JSON.parse(s1); } catch(e){} }
-  }
-  if (!atts.length && p.name != null){
-    var s2 = localStorage.getItem("appleseed_project_atts_name_" + String(p.name).trim()) || localStorage.getItem("appleseed_atts_name_" + String(p.name).trim());
-    if (s2){ try { atts = JSON.parse(s2); } catch(e){} }
-  }
-  
-  /* 구글 시트 DB memos 테이블에서 온라인 파일 보관 데이터 조회 및 복원 */
-  var memos = (state.data && Array.isArray(state.data.memos)) ? state.data.memos : [];
-  var memoFileMap = {};
-  var memoChunks = {};
-  memos.forEach(function(m){
-    if (!m || !m.title) return;
-    if (m.title.indexOf("[FILE:") === 0){
-      try {
-        var fileId = m.title.split("[FILE:")[1].split("]")[0];
-        memoFileMap[fileId] = m.content;
-      } catch(err){}
-    } else if (m.title.indexOf("[CHUNK:") === 0){
-      try {
-        var parts = m.title.split("[CHUNK:")[1].split("]")[0].split(":");
-        var cFileId = parts[0], cIdx = parseInt(parts[1],10);
-        if (!memoChunks[cFileId]) memoChunks[cFileId] = [];
-        memoChunks[cFileId][cIdx] = m.content || "";
-      } catch(err){}
-    }
-  });
-  
-  Object.keys(memoChunks).forEach(function(cId){
-    memoFileMap[cId] = memoChunks[cId].join("");
-  });
-  
-  var gdriveFolderUrl = "https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41";
-  (Array.isArray(atts)?atts:[]).forEach(function(att){
-    if (att && att.id){
-      if (memoFileMap[att.id]){
-        att.url = memoFileMap[att.id];
-      } else if (att.url && (att.url.indexOf("local:") === 0 || att.url.indexOf("memo:") === 0)){
-        var localId = att.url.replace(/^(local|memo):/, "");
-        var storedData = attMemoryCache[localId] || localStorage.getItem("appleseed_att_data_" + localId) || memoFileMap[localId];
-        att.url = storedData || gdriveFolderUrl;
-      }
-    }
-  });
-  
-  return { nextAction: cleanAction, attachments: Array.isArray(atts) ? atts : [] };
+/* ============ 프로젝트 첨부자료 (전용 atts 테이블) ============
+   과거에는 projects.next_action 안에 [ATTS:{json}] 문자열로 첨부 목록을 밀어넣고
+   localStorage에 base64까지 보관했으나, JSON 잘림·용량초과로 데이터가 깨졌다.
+   이제 첨부는 전적으로 atts 테이블(id, project_id, name, type, size, date, url, gdrive_id, memo)에만 저장한다. */
+var ATT_FOLDER_ID = "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41";
+var ATT_FOLDER_URL = "https://drive.google.com/drive/u/0/folders/" + ATT_FOLDER_ID;
+
+function attRowsForProjectId(pid){
+  if (pid == null || pid === "") return [];
+  var all = (state.data && Array.isArray(state.data.atts)) ? state.data.atts : [];
+  var key = String(pid);
+  return all.filter(function(a){ return a && String(a.project_id) === key; });
 }
 
 function getProjectAttachments(p){
-  return extractAttachmentsFromProject(p).attachments;
+  if (!p) return [];
+  return attRowsForProjectId(p.id);
 }
 
-var attMemoryCache = {};
+/* next_action은 사용자가 입력한 텍스트만 담는다.
+   과거 [ATTS:...] 잔재가 남은 행은 화면에서만 잘라서 보여준다(원본은 수정하지 않음). */
+function cleanNextActionText(s){
+  return String(s || "").replace(/\[ATTS:[\s\S]*$/, "").trim();
+}
 
-function saveProjectAttachments(projectId, attsArr, projectName, isOverwrite){
-  if (!projectId && !projectName) return;
-  var cleanArr = Array.isArray(attsArr) ? attsArr : [];
-  
-  var targetP = null;
-  if (state.data && state.data.projects){
-    state.data.projects.forEach(function(p){
-      if ((projectId && String(p.id) === String(projectId)) || (projectName && p.name === projectName)){
-        targetP = p;
-      }
-    });
+/* 이 첨부가 이미 서버(atts 테이블)에 존재하는 행인지 */
+function attIsSaved(att){
+  if (!att || att.id == null) return false;
+  var all = (state.data && Array.isArray(state.data.atts)) ? state.data.atts : [];
+  for (var i = 0; i < all.length; i++){
+    if (String(all[i].id) === String(att.id)) return true;
   }
-  
-  var finalArr = cleanArr;
-  if (!isOverwrite){
-    var existing = [];
-    if (projectId != null){
-      try {
-        var localSaved = localStorage.getItem("appleseed_project_atts_id_" + projectId);
-        if (localSaved) existing = JSON.parse(localSaved);
-      } catch(e){}
-    }
-    if (!existing.length && targetP && Array.isArray(targetP.attachments)){
-      existing = targetP.attachments;
-    }
-    
-    var mergedMap = {};
-    existing.concat(cleanArr).forEach(function(att){
-      if (att && (att.id || att.name)){
-        var key = att.id || att.name;
-        mergedMap[key] = att;
-      }
-    });
-    finalArr = Object.values(mergedMap);
-  }
-  
-  /* 새로고침 시 즉시 복구 가능하도록 동기적 보존 저장 */
-  try {
-    if (projectId != null) localStorage.setItem("appleseed_project_atts_id_" + projectId, JSON.stringify(finalArr));
-    if (projectName != null) localStorage.setItem("appleseed_project_atts_name_" + String(projectName).trim(), JSON.stringify(finalArr));
-  } catch(e){ console.warn("Quota exceeded for project atts list, stored in memory cache"); }
-  
-  if (targetP) targetP.attachments = finalArr;
-  
-  /* 메타데이터만 next_action 서식 문자열에 저장 */
-  var serverArr = finalArr.map(function(att){
-    var copy = Object.assign({}, att);
-    if (copy.url && copy.url.indexOf("data:") === 0){
-      attMemoryCache[copy.id] = copy.url;
-      try { localStorage.setItem("appleseed_att_data_" + copy.id, copy.url); } catch(e){}
-      copy.url = "memo:" + copy.id;
-    }
-    return copy;
+  return false;
+}
+
+/* 첨부 1건을 atts 테이블에 추가 */
+function insertAttachmentRow(projectId, att){
+  if (projectId == null || !att) return Promise.resolve(null);
+  return crud("POST", "atts", null, {
+    project_id: String(projectId),
+    name: att.name || "",
+    type: att.type || "file",
+    size: att.size || "",
+    date: att.date || seoulNow().toISOString().slice(0,10),
+    url: att.url || "",
+    gdrive_id: att.gdrive_id || "",
+    memo: att.memo || ""
   });
-  
-  var currentAction = targetP ? (targetP.next_action || "") : "";
-  var cleanText = currentAction.replace(/\[ATTS:.*?\]/g, "").trim();
-  var newNextActionStr = serverArr.length > 0
-    ? (cleanText ? cleanText + " " : "") + "[ATTS:" + JSON.stringify({ attachments: serverArr }) + "]"
-    : cleanText;
-  
-  if (targetP) targetP.next_action = newNextActionStr;
-  
-  if (projectId != null){
-    crud("PATCH", "projects", projectId, { next_action: newNextActionStr });
-  }
 }
 
-function deleteAttachmentItem(projectId, curAtts, index, projectName, onDone){
-  var removed = curAtts.splice(index, 1);
-  if (removed && removed[0]){
-    var item = removed[0];
-    if (item.id){
-      delete attMemoryCache[item.id];
-      try { localStorage.removeItem("appleseed_att_data_" + item.id); } catch(e){}
-    }
-    var gId = item.gdriveId || (item.url && item.url.indexOf("id=") > -1 ? (item.url.match(/id=([a-zA-Z0-9_-]+)/) || [])[1] : null);
-    if (gId){
-      apiSend("POST", null, { action: "deleteDrive", fileId: gId }).catch(function(){});
-    }
+/* 보류 중인(아직 프로젝트 id가 없어 저장 못한) 첨부들을 확정된 프로젝트에 붙인다 */
+async function flushPendingAttachments(projectId, pendingArr){
+  if (projectId == null || !Array.isArray(pendingArr) || !pendingArr.length) return;
+  for (var i = 0; i < pendingArr.length; i++){
+    await insertAttachmentRow(projectId, pendingArr[i]);
   }
-  saveProjectAttachments(projectId, curAtts, projectName, true);
+  pendingArr.length = 0;
+}
+
+/* 첨부 삭제: 드라이브 원본 삭제(실패해도 무시) → atts 행 삭제 */
+async function deleteAttachmentItem(projectId, curAtts, index, projectName, onDone){
+  var arr = Array.isArray(curAtts) ? curAtts : [];
+  var item = arr[index];
+  if (!item){ if (typeof onDone === "function") onDone(); return; }
+  arr.splice(index, 1);
+  var saved = attIsSaved(item);
+  var gId = item.gdrive_id || parseGoogleDriveFileId(item.url);
+  if (gId){
+    try { await apiSend("POST", null, null, { action: "deleteDrive", fileId: gId }); } catch(e){}
+  }
+  if (saved) await crud("DELETE", "atts", item.id);
   if (typeof onDone === "function") onDone();
 }
 
@@ -1166,11 +1073,8 @@ async function loadData(){
   /* 이 조회가 시작된 뒤에 변이가 있었다면(또는 변이 진행 중) 낡은 스냅샷이므로 버림 */
   if (startedAt < lastMutationAt){ state.loading = false; return; }
   state.data = applyTombstones(j);
-  if (state.data && state.data.projects){
-    state.data.projects.forEach(function(p){
-      p.attachments = extractAttachmentsFromProject(p).attachments;
-    });
-  }
+  /* 첨부는 전용 atts 테이블에만 존재 — 서버가 아직 안 내려주면 빈 배열로 둔다 */
+  if (state.data && !Array.isArray(state.data.atts)) state.data.atts = [];
   state.loading = false;
   state.error = null;
 }
@@ -1268,18 +1172,14 @@ async function crud(method, table, id, body){
           if (!found && !cur.some(function(r){ return String(r.id) === String(res.row.id); })) cur.push(res.row);
         } else if (method === "PATCH"){
           for (var j=0;j<cur.length;j++){
-            if (String(cur[j].id) === String(id)){
-              var existingAtts = getProjectAttachments(cur[j]);
-              cur[j] = res.row;
-              cur[j].attachments = getProjectAttachments(cur[j]).length > 0 ? getProjectAttachments(cur[j]) : existingAtts;
-              break;
-            }
+            if (String(cur[j].id) === String(id)){ cur[j] = res.row; break; }
           }
         }
         render();
       }
     }catch(eOpt){}
     if (resolvePending) resolvePending(res && res.row ? res.row.id : null);
+    return res;   /* 호출자가 확정 행(res.row.id)을 쓸 수 있어야 함 */
   }catch(e){
     if (resolvePending) resolvePending(null);
     var msg = String((e && e.message) || e);
@@ -1417,116 +1317,137 @@ function showUploadToast(msg, isDone){
   }, isDone ? 3000 : 7000);
 }
 
-async function addFilesToAtts(files, attArray, callback){
-  var filesArr = Array.from(files||[]);
+/* 파일 → 순수 base64 (data: 접두부 제거) */
+function readFileAsBase64(f){
+  return new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var dataUrl = String((e.target && e.target.result) || "");
+      resolve(dataUrl.replace(/^data:[^,]*,/, "").replace(/[\r\n\s]/g, ""));
+    };
+    reader.onerror = function(){ reject(new Error("파일을 읽지 못했습니다.")); };
+    reader.readAsDataURL(f);
+  });
+}
+
+var ATT_SINGLE_POST_LIMIT = 4 * 1024 * 1024;   /* base64 4MB 이하는 단일 POST */
+var ATT_CHUNK_SIZE = 1024 * 1024;              /* 초과분은 1MB 청크 업로드 */
+
+/* apiSend는 네트워크 3회 실패 시 {ok:true, fallback:true}를 돌려주므로
+   업로드에서는 fallback을 반드시 실패로 취급해야 한다(가짜 성공 방지). */
+function uploadResultUrl(res){
+  if (!res || res.fallback || !res.ok) return null;
+  return res.downloadUrl || res.fileUrl || null;
+}
+
+/* 구글드라이브 업로드. 성공 시 {fileId, url}, 실패 시 예외를 던진다. */
+async function uploadBase64ToDrive(fileName, mimeType, base64, onProgress){
+  if (!base64) throw new Error("빈 파일입니다.");
+  var mime = mimeType || "application/octet-stream";
+
+  if (base64.length <= ATT_SINGLE_POST_LIMIT){
+    if (typeof onProgress === "function") onProgress(5);
+    var res = await apiSend("POST", null, null, {
+      action: "uploadDrive",
+      folderId: ATT_FOLDER_ID,
+      fileName: fileName,
+      mimeType: mime,
+      fileData: base64
+    });
+    var url = uploadResultUrl(res);
+    if (!url) throw new Error("드라이브 업로드 실패 (서버 응답 없음)");
+    if (typeof onProgress === "function") onProgress(100);
+    return { fileId: (res && res.fileId) || "", url: url };
+  }
+
+  var totalChunks = Math.ceil(base64.length / ATT_CHUNK_SIZE);
+  var uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).substr(2,6);
+  var last = null;
+  for (var i = 0; i < totalChunks; i++){
+    if (typeof onProgress === "function") onProgress(Math.round((i / totalChunks) * 100));
+    last = await apiSend("POST", null, null, {
+      action: "uploadChunk",
+      uploadId: uploadId,
+      chunkIndex: i,
+      totalChunks: totalChunks,
+      folderId: ATT_FOLDER_ID,
+      fileName: fileName,
+      mimeType: mime,
+      chunkData: base64.substr(i * ATT_CHUNK_SIZE, ATT_CHUNK_SIZE)
+    });
+    if (!last || last.fallback || last.error){
+      throw new Error("업로드 중단 (" + (i + 1) + "/" + totalChunks + " 조각 전송 실패)");
+    }
+  }
+  var curl = uploadResultUrl(last);
+  if (!curl) throw new Error("드라이브 업로드 실패 (마지막 조각 응답 없음)");
+  if (typeof onProgress === "function") onProgress(100);
+  return { fileId: (last && last.fileId) || "", url: curl };
+}
+
+/* 파일들을 드라이브에 올리고 성공한 것만 atts 테이블에 기록한다.
+   projectId가 있으면 즉시 insert, 없으면(신규 프로젝트) pendingArr에 담아 저장 시점에 붙인다.
+   base64 데이터URL은 어떤 경우에도 시트에 저장하지 않는다. */
+async function addFilesToAtts(files, pendingArr, callback, projectId){
+  var filesArr = Array.prototype.slice.call(files || []);
   if (!filesArr.length) return;
   var nowStr = seoulNow().toISOString().slice(0,10);
   var total = filesArr.length;
-  
+  var okCount = 0;
+  var failed = [];
+
   for (var idx = 0; idx < total; idx++){
     var f = filesArr[idx];
-    var attId = 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
-    var t = getAttType(f.name, f.type);
-    
-    showUploadToast("구글드라이브 업로드 중... (" + (idx + 1) + "/" + total + ") " + f.name, false);
-    
+    var label = (total > 1 ? "(" + (idx + 1) + "/" + total + ") " : "") + f.name;
+    showUploadToast("업로드 준비 중 · " + label, false);
     try {
-      var dataUrl = await new Promise(function(res, rej){
-        var reader = new FileReader();
-        reader.onload = function(e){ res(e.target.result || ""); };
-        reader.onerror = function(err){ rej(err); };
-        reader.readAsDataURL(f);
-      });
-      
-      var pureBase64 = dataUrl ? String(dataUrl).replace(/^data:.*?;base64,/, "").replace(/[\r\n\s]/g, "") : "";
-      attMemoryCache[attId] = dataUrl;
-      
-      if (f.size < 3000000){
-        try { localStorage.setItem("appleseed_att_data_" + attId, dataUrl); } catch(err){}
-      }
-      
-      var finalUrl = dataUrl;
-      var gId = null;
-      
-      try {
-        if (pureBase64.length < 30 * 1024 * 1024){
-          var gResPromise = apiSend("POST", null, {
-            action: "uploadDrive",
-            folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
-            fileName: f.name,
-            mimeType: f.type || "application/octet-stream",
-            fileData: pureBase64
-          });
-          var timeoutPromise = new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 45000); });
-          var gRes = await Promise.race([gResPromise, timeoutPromise]);
-          if (gRes && gRes.ok && (gRes.fileUrl || gRes.downloadUrl)){
-            finalUrl = gRes.downloadUrl || gRes.fileUrl;
-            gId = gRes.fileId;
-          }
-        } else {
-          var chunkSize = 2 * 1024 * 1024;
-          var totalChunks = Math.ceil(pureBase64.length / chunkSize);
-          var uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).substr(2,6);
-          var lastRes = null;
-          
-          for (var cIdx = 0; cIdx < totalChunks; cIdx++){
-            var pct = Math.round(((cIdx + 1) / totalChunks) * 100);
-            showUploadToast("초대용량 구글드라이브 업로드 중... (" + pct + "% 완료) " + f.name, false);
-            var chunkData = pureBase64.substr(cIdx * chunkSize, chunkSize);
-            lastRes = await apiSend("POST", null, {
-              action: "uploadChunk",
-              uploadId: uploadId,
-              chunkIndex: cIdx,
-              totalChunks: totalChunks,
-              folderId: "1JOwJQ1quLsSz42AflxEm0_X7ifW60C41",
-              fileName: f.name,
-              mimeType: f.type || "application/octet-stream",
-              chunkData: chunkData
-            });
-          }
-          if (lastRes && lastRes.ok && (lastRes.fileUrl || lastRes.downloadUrl)){
-            finalUrl = lastRes.downloadUrl || lastRes.fileUrl;
-            gId = lastRes.fileId;
-          }
-        }
-      } catch(apiErr){ console.warn("Google Drive upload warning:", apiErr); }
-      
+      var base64 = await readFileAsBase64(f);
+      var up = await uploadBase64ToDrive(f.name, f.type, base64, makeUploadProgress(label));
       var attObj = {
-        id: attId,
         name: f.name,
-        type: t,
+        type: getAttType(f.name, f.type),
         size: formatBytes(f.size),
         date: nowStr,
-        url: finalUrl,
-        gdriveId: gId
+        url: up.url,
+        gdrive_id: up.fileId || ""
       };
-      
-      attArray.push(attObj);
+      if (projectId != null){
+        await insertAttachmentRow(projectId, attObj);
+      } else if (Array.isArray(pendingArr)){
+        attObj.id = "att_" + Date.now() + "_" + Math.random().toString(36).substr(2,6);
+        attObj.project_id = null;
+        pendingArr.push(attObj);
+      }
+      okCount++;
       if (typeof callback === "function") callback();
-      
     } catch(err){
-      console.warn("File upload error:", err);
-      showAlertDlg("파일 '" + f.name + "' 업로드 중 안내:\n" + String(err.message || err), "업로드 안내", false);
-      var fallbackObj = {
-        id: attId,
-        name: f.name,
-        type: t,
-        size: formatBytes(f.size),
-        date: nowStr,
-        url: "memo:" + attId
-      };
-      attArray.push(fallbackObj);
-      if (typeof callback === "function") callback();
+      console.warn("첨부 업로드 실패:", f.name, err);
+      failed.push(f.name + " — " + String((err && err.message) || err));
     }
   }
-  
-  showUploadToast("구글드라이브 저장 완료! (" + total + "개 파일)", true);
-  showAlertDlg("선택하신 " + total + "개 파일이 구글드라이브 폴더(애플시드관리시스템/프로젝트관리)에 성공적으로 업로드 및 생성되었습니다.", "구글드라이브 업로드 완료", true);
+
+  if (failed.length === 0){
+    showUploadToast("구글드라이브 업로드 완료 · " + okCount + "개", true);
+    showAlertDlg(okCount + "개 파일을 구글드라이브에 업로드하고 첨부자료실에 등록했습니다.", "업로드 완료", true);
+  } else if (okCount === 0){
+    showUploadToast("업로드 실패 · " + failed.length + "개", true);
+    showAlertDlg("업로드에 실패했습니다. 등록된 파일이 없습니다.\n\n" + failed.join("\n"), "업로드 실패", false);
+  } else {
+    showUploadToast("성공 " + okCount + "개 · 실패 " + failed.length + "개", true);
+    showAlertDlg("성공 " + okCount + "개, 실패 " + failed.length + "개입니다.\n실패한 파일은 등록되지 않았습니다.\n\n" + failed.join("\n"), "업로드 일부 실패", false);
+  }
+  if (typeof callback === "function") callback();
 }
 
-function handleFileUploadOrDrivePrompt(files, attArray, onComplete){
+function makeUploadProgress(label){
+  return function(pct){
+    showUploadToast("업로드 중 " + pct + "% · " + label, false);
+  };
+}
+
+function handleFileUploadOrDrivePrompt(files, pendingArr, onComplete, projectId){
   /* 외부 브라우저 팝업창을 절대 열지 않고 인앱에서 직접 온라인 업로드 연동 */
-  addFilesToAtts(files, attArray, onComplete);
+  addFilesToAtts(files, pendingArr, onComplete, projectId);
 }
 
 function setupDragAndDrop(box, onFilesDropped){
@@ -1655,26 +1576,6 @@ async function downloadAttachment(att){
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-  }
-}
-
-async function downloadAttachment(att){
-  if (!att) return;
-  var gdriveFolderUrl = "https://drive.google.com/drive/u/0/folders/1JOwJQ1quLsSz42AflxEm0_X7ifW60C41";
-  var filename = att.name || "attachment";
-  var url = att.url || gdriveFolderUrl;
-  var driveId = parseGoogleDriveFileId(url);
-  
-  if (driveId){
-    var dlUrl = "https://drive.google.com/uc?export=download&id=" + driveId;
-    window.open(dlUrl, "_blank");
-  } else if (url.indexOf("data:") === 0){
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
   } else {
     window.open(url, "_blank");
   }
@@ -1712,8 +1613,17 @@ var BOOLS = { done:1, all_day:1 };
 function openForm(table, row, defaults){
   var fields = FIELDS[table]; var editing = !!row;
   var body = "";
-  var currentAtts = (row && row.attachments) ? getProjectAttachments(row) : [];
-  
+  /* 첨부: 기존 프로젝트는 atts 테이블이 원본, 신규 프로젝트는 저장 시점까지 pendingAtts에 보류 */
+  var pendingAtts = [];
+  var currentAtts = [];
+  function attProjectId(){ return (table === "projects" && row && row.id != null) ? row.id : null; }
+  function syncCurrentAtts(){
+    var pid = attProjectId();
+    currentAtts = (pid != null) ? attRowsForProjectId(pid) : pendingAtts;
+    return currentAtts;
+  }
+  syncCurrentAtts();
+
   fields.forEach(function(f){
     var name=f[0], label=f[1], type=f[2], opts=f[3];
     var val = (row && row[name]!=null) ? row[name] : (defaults && defaults[name]!=null ? defaults[name] : "");
@@ -1769,15 +1679,13 @@ function openForm(table, row, defaults){
 
   if (attFormBox){
     setupDragAndDrop(attFormBox, function(files){
-      handleFileUploadOrDrivePrompt(files, currentAtts, function(){
-        if (row && (row.id || row.name)) saveProjectAttachments(row.id, currentAtts, row.name);
-        renderModalAtts();
-      });
+      handleFileUploadOrDrivePrompt(files, pendingAtts, renderModalAtts, attProjectId());
     });
   }
 
   function renderModalAtts(){
     if (!attItemsList) return;
+    syncCurrentAtts();
     if (!currentAtts.length){
       attItemsList.innerHTML = "<div style='font-size:12px; color:var(--ink-3); padding:8px 0; text-align:center;'>등록된 첨부파일이나 링크가 없습니다.</div>";
       return;
@@ -1811,9 +1719,7 @@ function openForm(table, row, defaults){
     attItemsList.querySelectorAll("[data-att-del]").forEach(function(b){
       b.onclick = function(){
         var i = parseInt(b.getAttribute("data-att-del"), 10);
-        var removed = currentAtts.splice(i, 1);
-        if (removed && removed[0]) deleteFileFromIDB(removed[0].idbKey || removed[0].id);
-        renderModalAtts();
+        deleteAttachmentItem(attProjectId(), currentAtts, i, null, renderModalAtts);
       };
     });
   }
@@ -1823,10 +1729,7 @@ function openForm(table, row, defaults){
     attFileInput.onchange = function(){
       var files = attFileInput.files;
       if (files && files.length){
-        handleFileUploadOrDrivePrompt(files, currentAtts, function(){
-          if (row && (row.id || row.name)) saveProjectAttachments(row.id, currentAtts, row.name);
-          renderModalAtts();
-        });
+        handleFileUploadOrDrivePrompt(files, pendingAtts, renderModalAtts, attProjectId());
       }
       attFileInput.value = "";
     };
@@ -1839,14 +1742,14 @@ function openForm(table, row, defaults){
       u = u.trim();
       var title = prompt("링크 제목/설명을 입력하세요 (선택):", u) || u;
       var nowStr = seoulNow().toISOString().slice(0,10);
-      currentAtts.push({
-        id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
-        name: title.trim(),
-        type: 'link',
-        url: u,
-        size: '링크',
-        date: nowStr
-      });
+      var linkAtt = { name: title.trim(), type: 'link', url: u, size: '링크', date: nowStr, gdrive_id: "" };
+      var pid = attProjectId();
+      if (pid != null){
+        insertAttachmentRow(pid, linkAtt).then(renderModalAtts);
+      } else {
+        linkAtt.id = 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4);
+        pendingAtts.push(linkAtt);
+      }
       renderModalAtts();
     };
   }
@@ -1865,7 +1768,7 @@ function openForm(table, row, defaults){
     fields.forEach(function(f){
       var name=f[0], type=f[2];
       if (type === "attachments"){
-        obj[name] = currentAtts;
+        /* 첨부는 atts 테이블에만 저장 — projects 행에는 넣지 않는다 */
       } else {
         var inp = bg.querySelector("#f_"+name);
         if (!inp) return;
@@ -1886,15 +1789,14 @@ function openForm(table, row, defaults){
       }
     });
     close();
-    var pname = obj.name || (row ? row.name : "");
-    if (table === "projects"){
-      if (editing && row && row.id) saveProjectAttachments(row.id, currentAtts, pname);
-    }
     if (editing) await crud("PATCH", table, row.id, obj);
     else {
       var res = await crud("POST", table, null, obj);
-      if (table === "projects" && res && res.row && res.row.id){
-        saveProjectAttachments(res.row.id, currentAtts, pname);
+      /* 신규 프로젝트: 확정된 id가 나온 뒤에야 보류 첨부를 atts 테이블에 붙일 수 있다 */
+      if (table === "projects" && res && res.row && res.row.id != null){
+        await flushPendingAttachments(res.row.id, pendingAtts);
+      } else if (table === "projects" && pendingAtts.length){
+        showAlertDlg("프로젝트 저장에 실패해 첨부 " + pendingAtts.length + "건을 등록하지 못했습니다.", "첨부 등록 실패", false);
       }
     }
   };
@@ -2265,7 +2167,7 @@ function projectCards(list, withActions){
     return "<div class='card'><div class='card-top'><div><div class='card-name'>"+esc(p.name||"")+"</div><div class='card-period tnum'>"+esc(period)+"</div></div><span class='tag "+cls+"'>"+esc(p.type||"")+"</span></div>"+
       "<div class='card-mid'><div class='amount tnum'>"+moneyMan(p.contract_amount)+"</div><span class='status "+sc+"'><span class='dot'></span>"+esc(p.status||"")+"</span></div>"+
       "<div><div style='display:flex;justify-content:space-between;margin-bottom:6px'><span class='pct'>진행률</span><span class='pct tnum'>"+pct+"%</span></div><div class='prog'><i class='"+(pct===0?"zero":cls)+"' style='width:"+Math.max(pct,2)+"%'></i></div></div>"+
-      (p.next_action?"<div class='next'><span class='k'>다음 액션</span><span>"+esc(p.next_action)+"</span></div>":"")+act+"</div>";
+      (cleanNextActionText(p.next_action)?"<div class='next'><span class='k'>다음 액션</span><span>"+esc(cleanNextActionText(p.next_action))+"</span></div>":"")+act+"</div>";
   }).join("");
 }
 
@@ -2769,8 +2671,7 @@ function mountProjectWorkspace(container){
       "<div class='proj-d-actions'><button class='btn sm' data-p-edit>수정</button>"+
         "<button class='btn sm ghost danger' data-p-del>삭제</button></div></div>";
 
-    var ext = extractAttachmentsFromProject(p);
-    var cleanNextAction = ext.nextAction;
+    var cleanNextAction = cleanNextActionText(p.next_action);
 
     html += "<section class='proj-card'><div class='proj-card-h'>개요</div><div class='proj-fields'>"+
       pField("고객", esc(p.client||"—"))+
@@ -2800,7 +2701,10 @@ function mountProjectWorkspace(container){
       atts.forEach(function(att, aIdx){
         var badge = (att.type||"file").toLowerCase();
         var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "link" ? "링크" : "파일";
-        var isImg = badge === "image" && att.url && att.url.indexOf("data:image")===0;
+        /* 썸네일: 이제 base64가 아니라 드라이브 썸네일 엔드포인트를 쓴다 */
+        var thumbId = badge === "image" ? (att.gdrive_id || parseGoogleDriveFileId(att.url)) : null;
+        var thumbSrc = thumbId ? ("https://drive.google.com/thumbnail?id=" + thumbId + "&sz=w400") : null;
+        var isImg = !!thumbSrc;
         
         html += "<div class='att-card'>"+
           "<div class='att-card-head'>"+
@@ -2808,7 +2712,7 @@ function mountProjectWorkspace(container){
             "<span class='att-item-meta tnum'>"+esc(att.date||"")+"</span>"+
           "</div>"+
           "<div class='att-card-title'>"+esc(att.name||"")+"</div>"+
-          (isImg ? "<img src='"+att.url+"' class='att-thumb' data-preview-img='"+aIdx+"' title='클릭하여 이미지 보기'>" : "")+
+          (isImg ? "<img src='"+thumbSrc+"' class='att-thumb' data-preview-img='"+aIdx+"' title='클릭하여 이미지 보기' loading='lazy'>" : "")+
           "<div class='att-card-foot'>"+
             "<span class='att-item-meta tnum'>"+esc(att.size||"")+"</span>"+
             "<div class='att-card-actions'>"+
@@ -2878,22 +2782,15 @@ function mountProjectWorkspace(container){
     var attCard = detailEl.querySelector("#proj_att_card");
     if (attCard){
       setupDragAndDrop(attCard, function(files){
-        var curAtts = getProjectAttachments(p);
-        handleFileUploadOrDrivePrompt(files, curAtts, function(){
-          saveProjectAttachments(p.id, curAtts, p.name);
-          drawDetail();
-        });
+        handleFileUploadOrDrivePrompt(files, null, drawDetail, p.id);
       });
       var cFileBtn = attCard.querySelector("#cardBtnFile");
       var cFileInput = attCard.querySelector("#cardFileInput");
       if (cFileBtn && cFileInput){
         cFileBtn.onclick = function(){ cFileInput.click(); };
         cFileInput.onchange = function(){
-          var curAtts = getProjectAttachments(p);
-          handleFileUploadOrDrivePrompt(cFileInput.files, curAtts, function(){
-            saveProjectAttachments(p.id, curAtts, p.name);
-            drawDetail();
-          });
+          handleFileUploadOrDrivePrompt(cFileInput.files, null, drawDetail, p.id);
+          cFileInput.value = "";
         };
       }
       var cLinkBtn = attCard.querySelector("#cardBtnLink");
@@ -2901,17 +2798,14 @@ function mountProjectWorkspace(container){
         cLinkBtn.onclick = function(){
           var u = prompt("연결할 외부 파일 URL 또는 구글드라이브 링크를 입력하세요:");
           if (!u || !u.trim()) return;
-          var curAtts = getProjectAttachments(p);
-          curAtts.push({
-            id: 'att_' + Date.now(),
+          insertAttachmentRow(p.id, {
             name: u.trim().split('/').pop().split('?')[0] || "외부 링크",
             type: "link",
             size: "Drive Link",
             date: seoulNow().toISOString().slice(0,10),
-            url: u.trim()
-          });
-          saveProjectAttachments(p.id, curAtts, p.name);
-          drawDetail();
+            url: u.trim(),
+            gdrive_id: ""
+          }).then(drawDetail);
         };
       }
       var cDropHint = attCard.querySelector("#cardDropHint");
@@ -2951,12 +2845,9 @@ function mountProjectWorkspace(container){
       cFileInput.onchange = function(){
         var files = cFileInput.files;
         if (files && files.length){
-          var curAtts = getProjectAttachments(p);
-          handleFileUploadOrDrivePrompt(files, curAtts, function(){
-            saveProjectAttachments(p.id, curAtts, p.name);
-            drawDetail();
-          });
+          handleFileUploadOrDrivePrompt(files, null, drawDetail, p.id);
         }
+        cFileInput.value = "";
       };
     }
 
@@ -2976,11 +2867,7 @@ function mountProjectWorkspace(container){
         cAttCard.style.borderColor = "";
         var files = e.dataTransfer && e.dataTransfer.files;
         if (files && files.length){
-          var curAtts = getProjectAttachments(p);
-          handleFileUploadOrDrivePrompt(files, curAtts, function(){
-            saveProjectAttachments(p.id, curAtts, p.name);
-            drawDetail();
-          });
+          handleFileUploadOrDrivePrompt(files, null, drawDetail, p.id);
         }
       };
     }
@@ -3082,7 +2969,9 @@ function mountProjectWorkspace(container){
 }
 
 function openQuickAttachmentDialog(p){
+  /* atts 테이블이 원본 — 렌더링할 때마다 최신 목록을 다시 읽는다 */
   var curAtts = getProjectAttachments(p);
+  function syncQAtts(){ curAtts = getProjectAttachments(p); return curAtts; }
   var bg = el("<div class='modal-bg'><div class='modal'><div class='modal-h'><h3>📁 프로젝트 첨부자료 · "+esc(p.name||"")+"</h3><button class='icon-btn' id='qClose'>✕</button></div>"+
     "<div class='modal-b'>"+
       "<div class='fld'><label>첨부파일 / 링크 추가 (PDF, 이미지, 문서, 외부링크)</label>"+
@@ -3112,15 +3001,12 @@ function openQuickAttachmentDialog(p){
 
   if (qFormBox){
     setupDragAndDrop(qFormBox, function(files){
-      handleFileUploadOrDrivePrompt(files, curAtts, function(){
-        saveProjectAttachments(p.id, curAtts, p.name);
-        renderQList();
-        drawDetail();
-      });
+      handleFileUploadOrDrivePrompt(files, null, function(){ renderQList(); drawDetail(); }, p.id);
     });
   }
 
   function renderQList(){
+    syncQAtts();
     if (!curAtts.length){
       qList.innerHTML = "<div style='font-size:12px; color:var(--ink-3); text-align:center; padding:8px;'>등록된 첨부자료가 없습니다.</div>";
       return;
@@ -3166,11 +3052,7 @@ function openQuickAttachmentDialog(p){
   qFileInput.onchange = function(){
     var files = qFileInput.files;
     if (files && files.length){
-      handleFileUploadOrDrivePrompt(files, curAtts, function(){
-        saveProjectAttachments(p.id, curAtts, p.name);
-        renderQList();
-        drawDetail();
-      });
+      handleFileUploadOrDrivePrompt(files, null, function(){ renderQList(); drawDetail(); }, p.id);
     }
     qFileInput.value = "";
   };
@@ -3181,27 +3063,15 @@ function openQuickAttachmentDialog(p){
     u = u.trim();
     var title = prompt("링크 제목/설명을 입력하세요 (선택):", u) || u;
     var nowStr = seoulNow().toISOString().slice(0,10);
-    curAtts.push({
-      id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
-      name: title.trim(),
-      type: 'link',
-      url: u,
-      size: '링크',
-      date: nowStr
-    });
-    saveProjectAttachments(p.id, curAtts, p.name);
-    renderQList();
-    drawDetail();
+    insertAttachmentRow(p.id, {
+      name: title.trim(), type: 'link', url: u, size: '링크', date: nowStr, gdrive_id: ""
+    }).then(function(){ renderQList(); drawDetail(); });
   };
 
   renderQList();
 
+  /* 첨부는 추가·삭제 즉시 atts 테이블에 반영되므로 저장 버튼은 닫기 역할만 한다 */
   bg.querySelector("#qSave").onclick = function(){
-    try {
-      saveProjectAttachments(p.id, curAtts, p.name);
-    } catch(err){
-      console.error("Save error:", err);
-    }
     bg.remove();
     try {
       drawDetail();
@@ -3968,11 +3838,8 @@ function renderLibrary(){
       if (!targetP){ alert("존재하지 않는 프로젝트입니다."); return; }
       
       fileInput.onchange = function(){
-        var curAtts = getProjectAttachments(targetP);
-        handleFileUploadOrDrivePrompt(fileInput.files, curAtts, function(){
-          saveProjectAttachments(targetP.id, curAtts, targetP.name);
-          renderLibrary();
-        });
+        handleFileUploadOrDrivePrompt(fileInput.files, null, renderLibrary, targetP.id);
+        fileInput.value = "";
       };
       fileInput.click();
     };
