@@ -652,6 +652,7 @@
   .att-badge.pdf{background:#ef4444; color:#fff;}
   .att-badge.image{background:#3b82f6; color:#fff;}
   .att-badge.link{background:#10b981; color:#fff;}
+  .att-badge.video{background:#f59e0b; color:#fff;}
   .att-badge.file{background:#8b5cf6; color:#fff;}
   .att-item-name{font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .att-item-meta{font-size:11px; color:var(--ink-3); flex:none;}
@@ -1312,6 +1313,7 @@ function getAttType(fileName, mimeType){
   var fn = String(fileName||"").toLowerCase();
   if (/\.(jpg|jpeg|png|gif|webp|svg)$/.test(fn) || (mimeType&&mimeType.indexOf("image")===0)) return "image";
   if (/\.pdf$/.test(fn) || mimeType==="application/pdf") return "pdf";
+  if (/\.(mp4|mov|m4v|webm|avi|mkv|wmv|flv|mpg|mpeg)$/.test(fn) || (mimeType&&mimeType.indexOf("video")===0)) return "video";
   if (/^https?:\/\//.test(fileName)) return "link";
   return "file";
 }
@@ -1619,6 +1621,19 @@ async function openAttachmentPreview(att){
   var url = att.url || gdriveFolderUrl;
   var driveId = parseGoogleDriveFileId(url);
 
+  /* 동영상은 새 창의 구글드라이브 플레이어로 재생한다(스트리밍 — 내려받지 않고 바로 재생).
+     드라이브에 없는 파일(외부 링크·data:)은 브라우저 기본 플레이어로 연다. */
+  if (attIsVideo(att)){
+    if (driveId){
+      window.open("https://drive.google.com/file/d/" + driveId + "/view", "_blank", "noopener");
+    } else if (url && url !== gdriveFolderUrl){
+      window.open(url, "_blank", "noopener");
+    } else {
+      showAlertDlg("재생할 수 있는 동영상 주소가 없습니다.", "동영상 재생", false);
+    }
+    return;
+  }
+
   /* PDF는 모달 iframe 대신 새 창에서 연다 */
   if (attIsPdf(att)){
     if (driveId){
@@ -1833,7 +1848,7 @@ function openForm(table, row, defaults){
     var h = "";
     currentAtts.forEach(function(item, idx){
       var badge = (item.type||"file").toLowerCase();
-      var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "link" ? "링크" : "파일";
+      var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "video" ? "동영상" : badge === "link" ? "링크" : "파일";
       h += "<div class='att-item-row'>"+
         "<div class='att-item-main'>"+
           "<span class='att-badge "+badge+"'>"+bLabel+"</span>"+
@@ -1843,7 +1858,7 @@ function openForm(table, row, defaults){
         "<div style='display:flex; gap:4px; align-items:center;'>"+
           (badge==='link' ?
             "<a href='"+item.url+"' target='_blank' rel='noopener' class='btn xs ghost'>↗</a>" :
-            "<button type='button' class='btn xs primary' data-att-view-m='"+idx+"'>👁️ 보기</button>"+
+            "<button type='button' class='btn xs primary' data-att-view-m='"+idx+"'>"+(badge==="video"?"▶️ 재생":"👁️ 보기")+"</button>"+
             "<button type='button' class='btn xs ghost' data-att-dl-m='"+idx+"'>💾 다운로드</button>")+
           "<button type='button' class='att-item-del' data-att-del='"+idx+"'>🗑</button>"+
         "</div>"+
@@ -2840,7 +2855,7 @@ function mountProjectWorkspace(container){
       html += "<div class='att-grid'>";
       atts.forEach(function(att, aIdx){
         var badge = (att.type||"file").toLowerCase();
-        var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "link" ? "링크" : "파일";
+        var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "video" ? "동영상" : badge === "link" ? "링크" : "파일";
         /* 썸네일: 이제 base64가 아니라 드라이브 썸네일 엔드포인트를 쓴다 */
         var thumbId = badge === "image" ? (att.gdrive_id || parseGoogleDriveFileId(att.url)) : null;
         var thumbSrc = thumbId ? ("https://drive.google.com/thumbnail?id=" + thumbId + "&sz=w400") : null;
@@ -2858,7 +2873,7 @@ function mountProjectWorkspace(container){
             "<div class='att-card-actions'>"+
               (badge === 'link' ?
                 "<a href='"+att.url+"' target='_blank' rel='noopener' class='btn sm ghost'>↗ 링크</a>" :
-                "<button type='button' class='btn sm primary' data-att-view-proj='"+aIdx+"'>👁️ 보기</button>"+
+                "<button type='button' class='btn sm primary' data-att-view-proj='"+aIdx+"'>"+(badge==="video"?"▶️ 재생":"👁️ 보기")+"</button>"+
                 "<button type='button' class='btn sm ghost' data-att-dl-proj='"+aIdx+"' title='다운로드'>💾 다운로드</button>")+
               "<button class='icon-btn del' data-att-del-proj='"+aIdx+"' title='삭제'>🗑</button>"+
             "</div>"+
@@ -3130,7 +3145,7 @@ function openQuickAttachmentDialog(p){
     var h = "";
     curAtts.forEach(function(item, idx){
       var badge = (item.type||"file").toLowerCase();
-      var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "link" ? "링크" : "파일";
+      var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "video" ? "동영상" : badge === "link" ? "링크" : "파일";
       h += "<div class='att-item-row'>"+
         "<div class='att-item-main'>"+
           "<span class='att-badge "+badge+"'>"+bLabel+"</span>"+
@@ -3140,7 +3155,7 @@ function openQuickAttachmentDialog(p){
         "<div style='display:flex; gap:4px; align-items:center;'>"+
           (badge==='link' ?
             "<a href='"+item.url+"' target='_blank' rel='noopener' class='btn xs ghost'>↗</a>" :
-            "<button type='button' class='btn xs primary' data-att-view-q='"+idx+"'>👁️ 보기</button>"+
+            "<button type='button' class='btn xs primary' data-att-view-q='"+idx+"'>"+(badge==="video"?"▶️ 재생":"👁️ 보기")+"</button>"+
             "<button type='button' class='btn xs ghost' data-att-dl-q='"+idx+"'>💾 다운로드</button>")+
           "<button type='button' class='att-item-del' data-qdel='"+idx+"'>🗑</button>"+
         "</div>"+
@@ -3891,7 +3906,7 @@ function boardFindById(id){
 
 function boardAttBadge(att){
   var badge = (att.type || "file").toLowerCase();
-  var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "link" ? "링크" : "파일";
+  var bLabel = badge === "pdf" ? "PDF" : badge === "image" ? "이미지" : badge === "video" ? "동영상" : badge === "link" ? "링크" : "파일";
   return "<span class='att-badge "+badge+"'>"+bLabel+"</span>";
 }
 
@@ -3906,6 +3921,13 @@ function attIsPdf(att){
   if (!att) return false;
   if ((att.type || "").toLowerCase() === "pdf") return true;
   return /\.pdf$/i.test(att.name || "");
+}
+
+/* mp4 등 동영상 판별 — 재생은 구글드라이브 플레이어(새 창)로 연결 */
+function attIsVideo(att){
+  if (!att) return false;
+  if ((att.type || "").toLowerCase() === "video") return true;
+  return /\.(mp4|mov|m4v|webm|avi|mkv|wmv|flv|mpg|mpeg)$/i.test(att.name || "");
 }
 
 /* 화면에 바로 그릴 수 있는 이미지 주소. 없으면 null */
@@ -4273,7 +4295,7 @@ function renderBoardDetail(){
           "<span class='att-item-meta tnum'>"+esc(att.date || "")+"</span>"+
         "</div>"+
         "<div class='row-actions'>"+
-          "<button type='button' class='btn sm primary' data-bda-view='"+aIdx+"'>👁️ 보기</button>"+
+          "<button type='button' class='btn sm primary' data-bda-view='"+aIdx+"'>"+(attIsVideo(att)?"▶️ 재생":"👁️ 보기")+"</button>"+
           "<button type='button' class='btn sm ghost' data-bda-dl='"+aIdx+"'>💾 다운로드</button>"+
           "<button type='button' class='att-item-del' data-bda-del='"+aIdx+"' title='삭제'>🗑</button>"+
         "</div>"+
