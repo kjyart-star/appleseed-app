@@ -3878,12 +3878,13 @@ function renderGov(){
 }
 
 /* ============ 자료실 (게시판 + 프로젝트 첨부파일 통합) ============ */
-var libBoardView = "list";       /* "list" | "detail" | "form" | "file" */
+var libBoardView = "list";       /* "list" | "detail" | "form" | "file" — URL 해시에서 파생 */
 var libBoardId = null;
 var libFileId = null;
 var libBoardSearch = "";
 var libBoardPage = 1;
 var libBoardForm = null;
+var libBoardFormKey = "";   /* 현재 libBoardForm 이 속한 화면 키("new" | "edit:<id>" | "") */
 var libBoardPending = [];   /* 새 글 작성 중 미리 올려둔 첨부(저장 시 새 글 id로 연결) */
 var libViewed = {};
 var libBoardFocus = false;
@@ -4059,7 +4060,69 @@ function libUnifiedItems(){
   return items;
 }
 
+/* ---- 자료실 내부 화면 = URL 해시 ----
+   목록 #library / 글 상세 #library/post/<id> / 글쓰기 #library/new
+   수정 #library/edit/<id> / 파일 상세 #library/file/<첨부id>
+   해시를 단일 진실 소스로 삼아 브라우저 뒤로가기가 바로 전 단계로 돌아가게 한다. */
+function libHash(view, id){
+  if (view === "detail") return "#library/post/" + encodeURIComponent(String(id));
+  if (view === "file") return "#library/file/" + encodeURIComponent(String(id));
+  if (view === "edit") return "#library/edit/" + encodeURIComponent(String(id));
+  if (view === "new") return "#library/new";
+  return "#library";
+}
+
+/* 해시를 바꿔 화면을 전환한다. 해시가 이미 같으면 hashchange 가 뜨지 않으므로 직접 다시 그린다.
+   (해시가 바뀌면 hashchange → render() → renderLibrary() 가 자동 실행되므로 직접 호출하지 않는다) */
+function libGo(view, id){
+  var h = libHash(view, id);
+  if (location.hash === h){ renderLibrary(); return; }
+  location.hash = h;
+}
+
+/* 현재 해시에서 자료실 내부 화면과 대상 id 를 읽는다 */
+function libParseHash(){
+  var parts = location.hash.replace(/^#/, "").split("/");
+  var seg = parts[1] || "";
+  var id = parts[2] ? decodeURIComponent(parts[2]) : "";
+  if (seg === "post" && id) return { view: "detail", id: id };
+  if (seg === "file" && id) return { view: "file", id: id };
+  if (seg === "edit" && id) return { view: "form", id: id };
+  if (seg === "new") return { view: "form", id: null };
+  return { view: "list", id: null };
+}
+
+/* 저장하지 않고 글쓰기 화면을 벗어날 때, 미리 올려둔 드라이브 파일 정리(고아 방지) */
+function libDiscardPending(){
+  var items = libBoardPending.slice();
+  libBoardPending = [];
+  for (var i = 0; i < items.length; i++){
+    (function(it){
+      try { discardOrphanDriveFile(it.gdrive_id || parseGoogleDriveFileId(it.url)); } catch(e){}
+    })(items[i]);
+  }
+}
+
 function renderLibrary(){
+  var st = libParseHash();
+
+  /* 없는 id 는 목록으로 안전 폴백 */
+  if (st.view === "detail" && !boardFindById(st.id)){ libGo("list"); return; }
+  if (st.view === "file" && !libAttFindById(st.id)){ libGo("list"); return; }
+  if (st.view === "form" && st.id && !boardFindById(st.id)){ libGo("list"); return; }
+
+  /* 글쓰기 화면이 바뀌었으면(다른 글 수정 / 목록 이탈) 임시 입력값·보류 첨부를 정리 */
+  var formKey = st.view === "form" ? (st.id ? "edit:" + st.id : "new") : "";
+  if (formKey !== libBoardFormKey){
+    if (libBoardFormKey && libBoardPending.length) libDiscardPending();
+    libBoardForm = null;
+    libBoardFormKey = formKey;
+  }
+
+  libBoardView = st.view;
+  libBoardId = (st.view === "detail" || st.view === "form") ? st.id : null;
+  libFileId = st.view === "file" ? st.id : null;
+
   if (libBoardView === "file") { renderFileDetail(); return; }
   if (libBoardView === "detail") { renderBoardDetail(); return; }
   if (libBoardView === "form") { renderBoardForm(); return; }
@@ -4191,10 +4254,9 @@ function renderBoardList(){
   var newBtn = C.querySelector("[data-bd-new]");
   if (newBtn){
     newBtn.onclick = function(){
-      libBoardId = null;
       libBoardForm = null;
-      libBoardView = "form";
-      renderLibrary();
+      libBoardFormKey = "";
+      libGo("new");
     };
   }
 
@@ -4212,18 +4274,14 @@ function renderBoardList(){
   C.querySelectorAll("[data-bd-open]").forEach(function(tr){
     tr.onclick = function(e){
       if (e && e.target && e.target.closest && (e.target.closest("button") || e.target.closest(".row-actions"))) return;
-      libBoardId = tr.getAttribute("data-bd-open");
-      libBoardView = "detail";
-      renderLibrary();
+      libGo("detail", tr.getAttribute("data-bd-open"));
     };
   });
 
   C.querySelectorAll("[data-bd-file]").forEach(function(tr){
     tr.onclick = function(e){
       if (e && e.target && e.target.closest && (e.target.closest("button") || e.target.closest(".row-actions"))) return;
-      libFileId = tr.getAttribute("data-bd-file");
-      libBoardView = "file";
-      renderLibrary();
+      libGo("file", tr.getAttribute("data-bd-file"));
     };
   });
 
@@ -4238,12 +4296,7 @@ function renderBoardList(){
 /* ---- 게시판: 상세 ---- */
 function renderBoardDetail(){
   var row = boardFindById(libBoardId);
-  if (!row){
-    libBoardView = "list";
-    libBoardId = null;
-    renderBoardList();
-    return;
-  }
+  if (!row){ libGo("list"); return; }
 
   /* 조회수 1회만 증가 — crud()가 render()를 다시 부르므로 가드를 먼저 세운다 */
   if (!libViewed[String(row.id)]){
@@ -4369,10 +4422,7 @@ function renderBoardDetail(){
 
   var listBtn = C.querySelector("[data-bd-list]");
   if (listBtn){
-    listBtn.onclick = function(){
-      libBoardView = "list";
-      renderLibrary();
-    };
+    listBtn.onclick = function(){ libGo("list"); };
   }
 
   var editBtn = C.querySelector("[data-bd-edit]");
@@ -4382,8 +4432,8 @@ function renderBoardDetail(){
         title: row.title || "", author: row.author || "",
         category: row.category || "", content: row.content || ""
       };
-      libBoardView = "form";
-      renderLibrary();
+      libBoardFormKey = "edit:" + String(row.id);
+      libGo("edit", row.id);
     };
   }
 
@@ -4397,9 +4447,7 @@ function renderBoardDetail(){
         await deleteAttachmentItem(row.id, curAtts, k, row.title || "", null);
       }
       await crud("DELETE", "board", row.id);
-      libBoardView = "list";
-      libBoardId = null;
-      renderLibrary();
+      libGo("list");
     };
   }
 }
@@ -4537,8 +4585,8 @@ function renderBoardForm(){
         libBoardPending = [];
       }
       libBoardForm = null;
-      libBoardView = isEdit ? "detail" : "list";
-      renderLibrary();
+      libBoardFormKey = "";
+      if (isEdit) libGo("detail", row.id); else libGo("list");
     };
   }
 
@@ -4559,10 +4607,9 @@ function renderBoardForm(){
         var editId = libBoardId;
         await crud("PATCH", "board", editId, { title: title, author: author, category: category, content: content });
         libBoardForm = null;
+        libBoardFormKey = "";
         libBoardPending = [];   /* 수정 모드는 첨부가 이미 글에 연결되어 있음 */
-        libBoardId = editId;
-        libBoardView = "detail";
-        renderLibrary();
+        libGo("detail", editId);
         return;
       }
 
@@ -4585,17 +4632,15 @@ function renderBoardForm(){
         await showAlertDlg("글은 저장되었지만 글 id를 확인하지 못해 첨부를 연결하지 못했습니다.", "첨부 연결 실패", false);
       }
       libBoardForm = null;
+      libBoardFormKey = "";
+      libBoardPending = [];   /* 이미 새 글에 연결됨 — 화면 전환 시 정리 대상이 아니다 */
       if (newId){
         libViewed[String(newId)] = 1;   /* 새 글은 조회수 증가 없음 */
-        libBoardId = newId;
-        libBoardView = "detail";
+        libGo("detail", newId);
       } else {
-        libBoardId = null;
-        libBoardView = "list";
         libBoardPage = 1;
+        libGo("list");
       }
-      libBoardPending = [];
-      renderLibrary();
     };
   }
 }
@@ -4603,12 +4648,7 @@ function renderBoardForm(){
 /* ---- 자료실: 파일 1건 상세 ---- */
 function renderFileDetail(){
   var att = libAttFindById(libFileId);
-  if (!att){
-    libBoardView = "list";
-    libFileId = null;
-    renderBoardList();
-    return;
-  }
+  if (!att){ libGo("list"); return; }
   var proj = libProjectById(att.project_id);
   var pName = proj ? (proj.name || "미지정 프로젝트") : "미지정 프로젝트";
   var pClient = proj ? String(proj.client || "") : "";
@@ -4665,11 +4705,7 @@ function renderFileDetail(){
   if (dBtn) dBtn.onclick = function(){ downloadAttachment(att); };
 
   var lBtn = C.querySelector("[data-lf-list]");
-  if (lBtn) lBtn.onclick = function(){
-    libBoardView = "list";
-    libFileId = null;
-    renderLibrary();
-  };
+  if (lBtn) lBtn.onclick = function(){ libGo("list"); };
 
   var xBtn = C.querySelector("[data-lf-del]");
   if (xBtn){
@@ -4681,16 +4717,9 @@ function renderFileDetail(){
       for (var i = 0; i < curAtts.length; i++){
         if (String(curAtts[i].id) === String(att.id)){ idx = i; break; }
       }
-      if (idx < 0){
-        libBoardView = "list";
-        libFileId = null;
-        renderLibrary();
-        return;
-      }
+      if (idx < 0){ libGo("list"); return; }
       await deleteAttachmentItem(att.project_id, curAtts, idx, pName, null);
-      libBoardView = "list";
-      libFileId = null;
-      renderLibrary();
+      libGo("list");
     };
   }
 }
