@@ -4898,7 +4898,8 @@ function hpWaitingHTML(){
     "① 리드 스프레드시트에 <b>visits_raw · visits_daily · leads</b> 시트 생성 → "+
     "② Apps Script에 수신 코드 붙여넣기 → ③ <b>\"새 버전\"으로 재배포</b> (새 배포 아님) → "+
     "④ Vercel에 <b>VISIT_WEBHOOK_URL</b> 등록.<br>"+
-    "자세한 방법: 홈페이지 저장소 <b>docs/specs/dashboard-visits.md</b> 5번 절 (대표가 할 일)</p></div></section>";
+    "자세한 방법: 홈페이지 저장소 <b>docs/specs/dashboard-visits.md</b> 5번 절 (대표가 할 일)<br>"+
+    "<span style='color:var(--ink-3)'>집계는 연동 시점부터 시작됩니다 — 과거 방문치는 복구할 수 없어 0에서 출발합니다.</span></p></div></section>";
 }
 
 function hpPaintChart(sd){
