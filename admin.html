@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>애플시드 관리 포털</title>
+<style>
+  /* 다크 테마 — 기존 대시보드 계열. 화면 분기는 편의일 뿐, 데이터 권한은 수신부가 강제한다 */
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1d212b; --line: #262b36;
+    --text: #e6e9ef; --dim: #8b93a3; --accent: #4ade80; --accent-dim: #22543a;
+    --danger: #f87171; --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text); min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard",
+      "Noto Sans KR", "Segoe UI", sans-serif;
+    font-size: 15px; line-height: 1.5;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; flex-wrap: wrap; padding: 8px 0 16px;
+  }
+  header h1 { font-size: 18px; letter-spacing: .02em; }
+  .who { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--dim); }
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px;
+    background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
+  }
+  .btn {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--dim); }
+  .btn-accent { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+  .btn-danger { border-color: var(--danger); color: var(--danger); background: transparent; }
+  .center-card {
+    max-width: 420px; margin: 15vh auto 0; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 14px; padding: 32px 24px; text-align: center;
+  }
+  .center-card h2 { font-size: 17px; margin-bottom: 8px; }
+  .center-card p { color: var(--dim); font-size: 14px; margin-bottom: 20px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+  }
+  .card .label { font-size: 12px; color: var(--dim); }
+  .card .value { font-size: 24px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  section { margin-top: 20px; }
+  section h2 { font-size: 15px; color: var(--dim); font-weight: 600; margin-bottom: 10px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .toggles { display: inline-flex; gap: 4px; margin-bottom: 10px; }
+  .toggles .btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+  svg#chart { width: 100%; height: auto; display: block; }
+  svg#chart rect { fill: var(--accent); opacity: .85; }
+  svg#chart text { font-size: 10px; fill: var(--dim); }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 640px) { .two-col { grid-template-columns: 1fr; } }
+  ul.ranked { list-style: none; }
+  ul.ranked li {
+    display: flex; justify-content: space-between; gap: 8px; padding: 5px 0;
+    border-bottom: 1px solid var(--line); font-size: 13px;
+  }
+  ul.ranked li:last-child { border-bottom: none; }
+  ul.ranked .n { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .table-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; white-space: nowrap; }
+  th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+  th { color: var(--dim); font-weight: 600; font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  select {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 6px; font-size: 13px;
+  }
+  .muted { color: var(--dim); font-size: 13px; }
+  .error { color: var(--danger); font-size: 13px; }
+  .notice {
+    background: var(--panel); border: 1px solid var(--warn); color: var(--warn);
+    border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-top: 12px;
+  }
+  .status-대기 { color: var(--warn); }
+  .status-활성 { color: var(--accent); }
+  .status-차단 { color: var(--danger); }
+  #loading { text-align: center; color: var(--dim); padding: 24vh 0; }
+  .hidden { display: none; }
+</style>
+<!-- Firebase compat CDN (Spark 무료 플랜 범위 — Functions 미사용) -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div id="loading">불러오는 중…</div>
+
+  <!-- 로그인 -->
+  <div id="view-login" class="center-card hidden">
+    <h2>애플시드 관리 포털</h2>
+    <p>구글 계정으로 로그인하십시오.</p>
+    <button class="btn btn-accent" id="btn-login">Google로 로그인</button>
+    <p id="login-error" class="error" style="margin-top:12px"></p>
+  </div>
+
+  <!-- 승인 대기 -->
+  <div id="view-pending" class="center-card hidden">
+    <h2>승인 대기 중</h2>
+    <p><span id="pending-email"></span><br>접근 요청이 등록되었습니다. 관리자 승인 후 이용할 수 있습니다.</p>
+    <button class="btn" onclick="logout()">로그아웃</button>
+  </div>
+
+  <!-- 차단 -->
+  <div id="view-blocked" class="center-card hidden">
+    <h2>접근이 차단되었습니다</h2>
+    <p><span id="blocked-email"></span><br>관리자에게 문의하십시오.</p>
+    <button class="btn" onclick="logout()">로그아웃</button>
+  </div>
+
+  <!-- 데이터 화면 -->
+  <div id="view-main" class="hidden">
+    <header>
+      <h1>애플시드 관리 포털</h1>
+      <div class="who">
+        <span id="me-email"></span>
+        <span class="badge" id="me-grade"></span>
+        <button class="btn" onclick="logout()">로그아웃</button>
+      </div>
+    </header>
+
+    <div id="key-notice" class="notice hidden"></div>
+    <div id="stats-error" class="error hidden"></div>
+
+    <!-- ① 요약 카드 -->
+    <div class="cards">
+      <div class="card"><div class="label">페이지뷰</div><div class="value" id="c-pv">–</div></div>
+      <div class="card"><div class="label">방문자</div><div class="value" id="c-vis">–</div></div>
+      <div class="card"><div class="label">리드</div><div class="value" id="c-leads">–</div></div>
+      <div class="card"><div class="label">전환율</div><div class="value" id="c-cvr">–</div></div>
+    </div>
+
+    <!-- ② 일별 방문 그래프 (1~3등급) -->
+    <section id="sec-chart" class="hidden">
+      <h2>일별 방문</h2>
+      <div class="panel">
+        <div class="toggles">
+          <button class="btn active" data-period="7">1주</button>
+          <button class="btn" data-period="30">1달</button>
+          <button class="btn" data-period="365">년</button>
+        </div>
+        <svg id="chart" viewBox="0 0 720 220" preserveAspectRatio="none"></svg>
+      </div>
+    </section>
+
+    <!-- ③ 유입 경로 · 나라별 (1~3등급) -->
+    <section id="sec-origins" class="hidden">
+      <div class="two-col">
+        <div class="panel"><h2>유입 경로</h2><ul class="ranked" id="list-sources"></ul></div>
+        <div class="panel"><h2>나라별</h2><ul class="ranked" id="list-countries"></ul></div>
+      </div>
+    </section>
+
+    <!-- ④ 리드 (1~3등급, 3등급은 서버가 마스킹해서 내려줌) -->
+    <section id="sec-leads" class="hidden">
+      <h2>리드 (최근 50건)</h2>
+      <div class="panel table-scroll">
+        <div id="leads-error" class="error hidden"></div>
+        <table id="leads-table">
+          <thead><tr>
+            <th>일시</th><th>구분</th><th>회사</th><th>이름</th><th>이메일</th><th>전화</th>
+            <th>항목</th><th>예산</th><th>일정</th><th>견적</th><th>상태</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ⑤ 사용자 관리 (1등급만) -->
+    <section id="sec-users" class="hidden">
+      <h2>사용자 관리</h2>
+      <div class="panel table-scroll">
+        <div id="users-error" class="error hidden"></div>
+        <table id="users-table">
+          <thead><tr>
+            <th>이메일</th><th>이름</th><th>상태</th><th>등급</th><th>요청일</th><th>동작</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+// ── 설정 — 오케스트레이터가 Firebase 프로젝트 생성 후 치환 ──────────
+var FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyDMq6PL_TYictGnir270Md_5kTEQ28JLCU',
+  authDomain: 'appleseed-admin.firebaseapp.com',
+  projectId: 'appleseed-admin'
+};
+var RECEIVER_URL = 'https://script.google.com/macros/s/AKfycbww9cob2CYg8PVnQO35WesnTaZRIPVmYg-ClLQbyWN7q-b2skKmXZG1XAjLbQhntnYA/exec';
+var ADMIN_EMAIL = 'kjyart@gmail.com'; // 표시용 — 실제 권한은 수신부와 Firestore 규칙이 강제
+
+var GRADE_NAMES = { 1: '1등급 · 대표', 2: '2등급 · 임원', 3: '3등급 · 사원', 4: '4등급 · 기타' };
+
+firebase.initializeApp(FIREBASE_CONFIG);
+var auth = firebase.auth();
+var db = firebase.firestore();
+
+var me = { user: null, grade: 0, period: 7 };
+
+// ── 화면 전환 ────────────────────────────────────────────────
+function show(id) {
+  ['loading', 'view-login', 'view-pending', 'view-blocked', 'view-main'].forEach(function (v) {
+    document.getElementById(v).classList.toggle('hidden', v !== id);
+  });
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function logout() { auth.signOut(); }
+
+// ── 로그인 ───────────────────────────────────────────────────
+document.getElementById('btn-login').addEventListener('click', function () {
+  document.getElementById('login-error').textContent = '';
+  auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(function (err) {
+    document.getElementById('login-error').textContent = '로그인 실패: ' + (err.message || err);
+  });
+});
+
+auth.onAuthStateChanged(function (user) {
+  if (!user) { show('view-login'); return; }
+  me.user = user;
+  show('loading');
+  resolveAccess(user);
+});
+
+// ── 접근 판정: 내 users 문서 확인 → 없으면 '대기'로 자동 생성 ─────
+function resolveAccess(user) {
+  var email = String(user.email || '').toLowerCase();
+  if (email === ADMIN_EMAIL) { enter(1); return; } // 어드민은 문서 없이도 통과 (수신부도 동일 판정)
+
+  var ref = db.collection('users').doc(user.uid);
+  ref.get().then(function (snap) {
+    if (!snap.exists) {
+      // 규칙상 '대기' + grade 0 으로만 생성 가능
+      return ref.set({
+        email: email,
+        name: user.displayName || '',
+        grade: 0,
+        status: '대기',
+        requestedAt: new Date().toISOString()
+      }).then(function () { showPending(email); });
+    }
+    var d = snap.data() || {};
+    if (d.status === '차단') { showBlocked(email); return; }
+    if (d.status === '활성' && d.grade >= 1 && d.grade <= 4) { enter(d.grade); return; }
+    showPending(email);
+  }).catch(function (err) {
+    show('view-login');
+    document.getElementById('login-error').textContent = '접근 확인 실패: ' + (err.message || err);
+  });
+}
+
+function showPending(email) {
+  document.getElementById('pending-email').textContent = email;
+  show('view-pending');
+}
+function showBlocked(email) {
+  document.getElementById('blocked-email').textContent = email;
+  show('view-blocked');
+}
+
+// ── 데이터 화면 ──────────────────────────────────────────────
+function enter(grade) {
+  me.grade = grade;
+  document.getElementById('me-email').textContent = me.user.email;
+  document.getElementById('me-grade').textContent = GRADE_NAMES[grade] || grade + '등급';
+  document.getElementById('sec-chart').classList.toggle('hidden', grade > 3);
+  document.getElementById('sec-origins').classList.toggle('hidden', grade > 3);
+  document.getElementById('sec-leads').classList.toggle('hidden', grade > 3);
+  document.getElementById('sec-users').classList.toggle('hidden', grade !== 1);
+  show('view-main');
+  loadStats(me.period);
+  if (grade <= 3) loadLeads();
+  if (grade === 1) loadUsers();
+}
+
+// 수신부 GET — idToken 을 매번 새로 받아 붙인다 (만료 대비)
+function callReceiver(params) {
+  return me.user.getIdToken().then(function (token) {
+    var qs = Object.keys(params).map(function (k) {
+      return k + '=' + encodeURIComponent(params[k]);
+    }).join('&');
+    return fetch(RECEIVER_URL + '?' + qs + '&idToken=' + encodeURIComponent(token))
+      .then(function (r) { return r.json(); });
+  });
+}
+
+// ① + ② + ③ 통계
+function loadStats(period) {
+  me.period = period;
+  var errBox = document.getElementById('stats-error');
+  errBox.classList.add('hidden');
+  ['c-pv', 'c-vis', 'c-leads', 'c-cvr'].forEach(function (id) {
+    document.getElementById(id).textContent = '…';
+  });
+  callReceiver({ action: 'stats2', period: period }).then(function (data) {
+    if (data.error) {
+      errBox.textContent = '통계를 불러오지 못했습니다: ' + data.error;
+      errBox.classList.remove('hidden');
+      return;
+    }
+    var t = data.totals || {};
+    document.getElementById('c-pv').textContent = Number(t.pageviews || 0).toLocaleString();
+    document.getElementById('c-vis').textContent = Number(t.visitors || 0).toLocaleString();
+    document.getElementById('c-leads').textContent = Number(t.leads || 0).toLocaleString();
+    document.getElementById('c-cvr').textContent = ((Number(data.conversionRate) || 0) * 100).toFixed(1) + '%';
+    if (data.days) drawChart(data.days, period);            // 서버가 안 준 섹션은 그리지 않는다
+    if (data.sources) drawRanked('list-sources', data.sources);
+    if (data.countries) drawRanked('list-countries', data.countries);
+  }).catch(function (err) {
+    errBox.textContent = '통계를 불러오지 못했습니다: ' + err;
+    errBox.classList.remove('hidden');
+  });
+}
+
+document.querySelectorAll('.toggles .btn').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    document.querySelectorAll('.toggles .btn').forEach(function (b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    loadStats(Number(btn.dataset.period));
+  });
+});
+
+// SVG 막대그래프 — 년 보기는 월 단위로 묶는다 (365개 막대는 읽을 수 없음)
+function drawChart(days, period) {
+  var buckets = days;
+  if (period === 365) {
+    var byMonth = {};
+    days.forEach(function (d) {
+      var m = String(d.date).slice(0, 7);
+      byMonth[m] = byMonth[m] || { date: m, pageviews: 0, visitors: 0, leads: 0 };
+      byMonth[m].pageviews += d.pageviews; byMonth[m].visitors += d.visitors;
+      byMonth[m].leads += d.leads || 0;
+    });
+    buckets = Object.keys(byMonth).sort().map(function (k) { return byMonth[k]; });
+  }
+  var W = 720, H = 220, PAD = 24;
+  var max = Math.max(1, Math.max.apply(null, buckets.map(function (d) { return d.visitors; })));
+  var bw = (W - PAD * 2) / Math.max(1, buckets.length);
+  var parts = [];
+  buckets.forEach(function (d, i) {
+    var h = Math.round((H - PAD * 2) * d.visitors / max);
+    var x = PAD + i * bw;
+    parts.push('<rect x="' + (x + 1) + '" y="' + (H - PAD - h) + '" width="' + Math.max(1, bw - 2) +
+      '" height="' + h + '"><title>' + esc(d.date) + ' · 방문자 ' + d.visitors +
+      ' · 페이지뷰 ' + d.pageviews + ' · 리드 ' + (d.leads || 0) + '</title></rect>');
+    if (buckets.length <= 12 || i % Math.ceil(buckets.length / 10) === 0) {
+      parts.push('<text x="' + (x + bw / 2) + '" y="' + (H - 6) + '" text-anchor="middle">' +
+        esc(String(d.date).slice(5)) + '</text>');
+    }
+  });
+  document.getElementById('chart').innerHTML = parts.join('');
+}
+
+// 유입 경로 · 나라별 — {이름: 수} 객체를 내림차순 상위 10개
+function drawRanked(listId, obj) {
+  var items = Object.keys(obj).map(function (k) { return { k: k, n: Number(obj[k]) || 0 }; })
+    .sort(function (a, b) { return b.n - a.n; }).slice(0, 10);
+  var ul = document.getElementById(listId);
+  if (!items.length) { ul.innerHTML = '<li><span class="muted">데이터 없음</span></li>'; return; }
+  ul.innerHTML = items.map(function (it) {
+    return '<li><span>' + esc(it.k || '(직접 방문)') + '</span><span class="n">' + it.n.toLocaleString() + '</span></li>';
+  }).join('');
+}
+
+// ④ 리드
+function loadLeads() {
+  var errBox = document.getElementById('leads-error');
+  errBox.classList.add('hidden');
+  callReceiver({ action: 'leads2', limit: 50 }).then(function (data) {
+    if (data.error) {
+      errBox.textContent = '리드를 불러오지 못했습니다: ' + data.error;
+      errBox.classList.remove('hidden');
+      return;
+    }
+    var tbody = document.querySelector('#leads-table tbody');
+    var leads = data.leads || [];
+    if (!leads.length) {
+      tbody.innerHTML = '<tr><td colspan="11" class="muted">리드가 없습니다.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = leads.map(function (l) {
+      return '<tr>' +
+        '<td>' + esc(String(l.submittedAt).slice(0, 10)) + '</td>' +
+        '<td>' + esc(l.source === 'estimate' ? '견적' : l.source === 'inquiry' ? '의뢰' : l.source) + '</td>' +
+        '<td>' + esc(l.company) + '</td>' +
+        '<td>' + esc(l.name) + '</td>' +
+        '<td>' + esc(l.email) + '</td>' +
+        '<td>' + esc(l.phone) + '</td>' +
+        '<td>' + esc(l.projectTypes) + '</td>' +
+        '<td>' + esc(l.budget) + '</td>' +
+        '<td>' + esc(l.timeline) + '</td>' +
+        '<td>' + esc(l.amountText || (l.productName || '')) + '</td>' +
+        '<td>' + esc(l.status || '신규') + '</td>' +
+        '</tr>';
+    }).join('');
+  }).catch(function (err) {
+    errBox.textContent = '리드를 불러오지 못했습니다: ' + err;
+    errBox.classList.remove('hidden');
+  });
+}
+
+// ⑤ 사용자 관리 (1등급) — Firestore 직접 조회·수정. 규칙이 어드민만 허용
+function loadUsers() {
+  var errBox = document.getElementById('users-error');
+  errBox.classList.add('hidden');
+  db.collection('users').get().then(function (qs) {
+    var rows = [];
+    qs.forEach(function (doc) {
+      var d = doc.data() || {};
+      rows.push({ uid: doc.id, email: d.email || '', name: d.name || '',
+        grade: Number(d.grade) || 0, status: d.status || '', requestedAt: d.requestedAt || '' });
+    });
+    rows.sort(function (a, b) { // 대기자 먼저
+      return (a.status === '대기' ? 0 : 1) - (b.status === '대기' ? 0 : 1);
+    });
+    var tbody = document.querySelector('#users-table tbody');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="muted">등록된 사용자가 없습니다.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(function (u) {
+      var opts = [1, 2, 3, 4].map(function (g) {
+        return '<option value="' + g + '"' + (u.grade === g ? ' selected' : '') + '>' + g + '등급</option>';
+      }).join('');
+      var blockBtn = u.status === '차단'
+        ? '<button class="btn" onclick="setStatus(\'' + esc(u.uid) + '\', \'unblock\')">해제</button>'
+        : '<button class="btn btn-danger" onclick="setStatus(\'' + esc(u.uid) + '\', \'block\')">차단</button>';
+      return '<tr>' +
+        '<td>' + esc(u.email) + '</td>' +
+        '<td>' + esc(u.name) + '</td>' +
+        '<td class="status-' + esc(u.status) + '">' + esc(u.status || '-') + '</td>' +
+        '<td><select id="grade-' + esc(u.uid) + '">' + (u.grade ? '' : '<option value="" selected>미지정</option>') + opts + '</select></td>' +
+        '<td>' + esc(String(u.requestedAt).slice(0, 10)) + '</td>' +
+        '<td><button class="btn btn-accent" onclick="approve(\'' + esc(u.uid) + '\')">승인</button> ' + blockBtn + '</td>' +
+        '</tr>';
+    }).join('');
+  }).catch(function (err) {
+    errBox.textContent = '사용자 목록을 불러오지 못했습니다: ' + (err.message || err);
+    errBox.classList.remove('hidden');
+  });
+}
+
+function approve(uid) {
+  var sel = document.getElementById('grade-' + uid);
+  var grade = Number(sel && sel.value);
+  if (!(grade >= 1 && grade <= 4)) { alert('등급(1~4)을 먼저 선택하십시오.'); return; }
+  db.collection('users').doc(uid).update({
+    grade: grade, status: '활성', approvedAt: new Date().toISOString()
+  }).then(loadUsers).catch(function (err) { alert('승인 실패: ' + (err.message || err)); });
+}
+
+function setStatus(uid, op) {
+  var ref = db.collection('users').doc(uid);
+  ref.get().then(function (snap) {
+    var d = snap.data() || {};
+    var status = op === 'block' ? '차단'
+      : (d.grade >= 1 && d.grade <= 4 ? '활성' : '대기'); // 해제 시 등급 있으면 활성 복귀
+    return ref.update({ status: status });
+  }).then(loadUsers).catch(function (err) { alert('변경 실패: ' + (err.message || err)); });
+}
+</script>
+</body>
+</html>
