@@ -125,6 +125,7 @@
       <div class="who">
         <span id="me-email"></span>
         <span class="badge" id="me-grade"></span>
+        <a class="btn hidden" id="link-dash" href="index.html" style="text-decoration:none">전체 대시보드</a>
         <button class="btn" onclick="logout()">로그아웃</button>
       </div>
     </header>
@@ -283,6 +284,8 @@ function enter(grade) {
   document.getElementById('sec-origins').classList.toggle('hidden', grade > 3);
   document.getElementById('sec-leads').classList.toggle('hidden', grade > 3);
   document.getElementById('sec-users').classList.toggle('hidden', grade !== 1);
+  /* 전체 대시보드(index.html)는 1·2등급만 — 3·4등급은 링크 자체를 숨긴다 */
+  document.getElementById('link-dash').classList.toggle('hidden', !(grade === 1 || grade === 2));
   show('view-main');
   loadStats(me.period);
   if (grade <= 3) loadLeads();
