@@ -789,7 +789,15 @@
   }
   @media (prefers-reduced-motion:reduce){*{transition:none !important;}}
   /* 홈페이지 메뉴(방문 통계): 요약 카드 5칸 */
-  .kpis.hp5{grid-template-columns:repeat(5,1fr);}
+  .hp-traffic-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:16px}
+@media(max-width:760px){.hp-traffic-grid{grid-template-columns:1fr}}
+.hp-bars{display:flex;flex-direction:column;gap:8px}
+.hp-bar-row{display:flex;align-items:center;gap:10px}
+.hp-bar-label{flex:0 0 110px;font-size:12.5px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hp-bar-track{flex:1;height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden}
+.hp-bar-fill{display:block;height:100%;border-radius:4px;background:var(--accent)}
+.hp-bar-count{flex:0 0 48px;text-align:right;font-size:12.5px;color:var(--ink-2)}
+.kpis.hp5{grid-template-columns:repeat(5,1fr);}
   @media (max-width:1100px){ .kpis.hp5{grid-template-columns:repeat(2,1fr);} }
   @media (max-width:460px){ .kpis.hp5{grid-template-columns:1fr;} }
 
@@ -4864,7 +4872,7 @@ function hpCardsHTML(s){
   var week = 0;
   for (var i=Math.max(0, days.length-7); i<days.length; i++) week += Number(days[i].visitors)||0;
   var t = s.totals||{};
-  var rate = (Number(s.conversionRate)||0)*100;
+  var rate = Number(s.conversionRate)||0;   /* 수신부가 이미 % 값을 반환 (2.5 = 2.5%) */
   return "<div class='kpi'><div class='label'>오늘 방문</div><div class='big tnum'>"+comma(today)+"</div><div class='meta'>방문자 기준</div></div>"+
     "<div class='kpi'><div class='label'>이번 주 방문</div><div class='big tnum'>"+comma(week)+"</div><div class='meta'>최근 7일 방문자</div></div>"+
     "<div class='kpi'><div class='label'>누적 방문</div><div class='big tnum'>"+comma(t.visitors)+"</div><div class='meta'>최근 1년 방문자</div></div>"+
@@ -4891,6 +4899,28 @@ function hpLeadsHTML(rows){
       "<td>"+esc(r.status||"신규")+"</td></tr>";
   });
   return h+"</tbody></table>";
+}
+
+/* 유입 채널 · 나라별 — stats 응답의 sources/countries (없으면 패널 자체를 숨김) */
+var HP_COUNTRY_NAMES = { KR:"한국", US:"미국", JP:"일본", CN:"중국", TW:"대만", HK:"홍콩", SG:"싱가포르", VN:"베트남", TH:"태국", ID:"인도네시아", IN:"인도", GB:"영국", DE:"독일", FR:"프랑스", CA:"캐나다", AU:"호주" };
+function hpBarListHTML(items, labelOf){
+  if (!items || !items.length) return "<div class='empty'>아직 데이터가 없습니다.</div>";
+  var max = Math.max.apply(null, items.map(function(x){ return Number(x.count)||0; })) || 1;
+  return "<div class='hp-bars'>"+items.map(function(x){
+    var n = Number(x.count)||0, w = Math.max(4, Math.round(n/max*100));
+    return "<div class='hp-bar-row'><span class='hp-bar-label'>"+esc(labelOf(x))+"</span>"+
+      "<span class='hp-bar-track'><span class='hp-bar-fill' style='width:"+w+"%'></span></span>"+
+      "<span class='hp-bar-count tnum'>"+comma(n)+"</span></div>";
+  }).join("")+"</div>";
+}
+function hpTrafficHTML(s){
+  var src = s.sources||[], co = s.countries||[];
+  if (!src.length && !co.length) return "";
+  return "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>유입 분석</div><h3>어디에서 왔나</h3></div><div class='sec-note'>최근 1년 · 페이지뷰 기준</div></div>"+
+    "<div class='hp-traffic-grid'>"+
+    "<div><div class='eyebrow' style='margin-bottom:8px'>유입 경로</div>"+hpBarListHTML(src, function(x){ return x.name; })+"</div>"+
+    "<div><div class='eyebrow' style='margin-bottom:8px'>나라별</div>"+hpBarListHTML(co, function(x){ return (HP_COUNTRY_NAMES[x.code] ? HP_COUNTRY_NAMES[x.code]+" ("+x.code+")" : x.code); })+"</div>"+
+    "</div></section>";
 }
 
 /* 수신부 미배포 안내 — 자세한 절차는 홈페이지 저장소 docs/specs/dashboard-visits.md 5번 절 */
@@ -4936,6 +4966,7 @@ function hpLoad(){
       "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>방문 추이</div><h3>일별 방문자</h3></div>"+
       "<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'><span class='sec-note' data-hp-sum></span>"+hpChipsHTML()+"</div></div>"+
       "<div class='chart-body'><div class='chart-scroll' data-hp-chart></div></div></section>"+
+      hpTrafficHTML(base)+
       "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>리드</div><h3>최근 리드 (견적·문의)</h3></div><div class='sec-note'>최근 20건</div></div>"+
       "<div class='tbl-scroll'>"+(leads ? hpLeadsHTML(leads) : "<div class='empty'>리드 데이터를 아직 받지 못했습니다. 수신부 연결 후 표시됩니다.</div>")+"</div></section>";
     hpPaintChart(want===365 ? base : res[1]);
