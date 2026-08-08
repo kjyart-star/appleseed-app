@@ -788,6 +788,10 @@
     .kpis{grid-template-columns:1fr;} .time-grid{grid-template-columns:1fr;}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none !important;}}
+  /* 홈페이지 메뉴(방문 통계): 요약 카드 5칸 */
+  .kpis.hp5{grid-template-columns:repeat(5,1fr);}
+  @media (max-width:1100px){ .kpis.hp5{grid-template-columns:repeat(2,1fr);} }
+  @media (max-width:460px){ .kpis.hp5{grid-template-columns:1fr;} }
 
   /* ===== AI 공모전 ===== */
   .ct-tabs{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;}
@@ -1306,7 +1310,7 @@ document.addEventListener("mousemove", function(e){
 var MENU = [
   { cap:"현황", items:[ ["dashboard","📊","대시보드",0] ] },
   { cap:"업무", items:[ ["todos","✅","할일관리",0], ["calendar","📅","일정관리",0], ["meetings","🎙️","전사록",0], ["memos","📝","메모관리",0], ["mail","✉️","메일관리",1] ] },
-  { cap:"영업", items:[ ["clients","🤝","고객관리",0], ["projects","🎬","프로젝트관리",0] ] },
+  { cap:"영업", items:[ ["clients","🤝","고객관리",0], ["projects","🎬","프로젝트관리",0], ["homepage","🌐","홈페이지",0] ] },
   { cap:"재무", items:[ ["revenue","💰","매출관리",0], ["deposits","🏦","입금관리",0], ["expenses","🧾","지출관리",0], ["profit","📈","영업이익분석",0], ["subs","🔁","AI 구독관리",0],
       ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",1] ] },
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
@@ -4758,12 +4762,203 @@ function renderFileDetail(){
   }
 }
 
+/* ============ 홈페이지 (apple-seed.co.kr 방문 · 리드) ============
+   데이터 계약: 홈페이지 저장소 docs/specs/dashboard-visits.md 가 정본.
+   GET ?action=stats&period=7|30|365
+     → { ok, period, days:[{date,pageviews,visitors,leads}…오래된→오늘], totals:{pageviews,visitors,leads}, conversionRate }
+   GET ?action=leads&key=…&limit=20
+     → { ok, leads:[{submittedAt,source,email,company,name,budget,amountMedian,amountText,status,…}] } (최신순)
+   목 검증: window.__MOCK__.homepageStats = {7:응답,30:응답,365:응답}
+           window.__MOCK__.homepageLeads = {ok:true, leads:[…]}
+   백엔드(Apps Script 수신부) 미배포 시에는 대기 안내를 띄운다 — 화면이 깨지지 않아야 한다. */
+var hpPeriod = 7;
+var hpStatsCache = {};          /* period → {t, data} — 60초 캐시 */
+var hpLeadsCache = null;        /* {t, data} */
+var HP_TTL = 60000;
+
+function hpFetchStats(period){
+  if (window.__MOCK__){
+    var m = window.__MOCK__.homepageStats;
+    return Promise.resolve((m && m[period]) || null);
+  }
+  var c = hpStatsCache[period];
+  if (c && (Date.now()-c.t) < HP_TTL) return Promise.resolve(c.data);
+  return fetch(GAS_URL+"?action=stats&period="+period+"&key="+encodeURIComponent(KEY)+"&t="+Date.now(), { cache:"no-store" })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (j && j.error === "unauthorized"){ keyRejected("접속 키가 거부되었습니다. 다시 입력해 주세요."); return "unauthorized"; }
+      var d = (j && j.ok && Array.isArray(j.days)) ? j : null;
+      if (d) hpStatsCache[period] = { t: Date.now(), data: d };
+      return d;
+    })
+    .catch(function(){ return null; });   /* 수신부 미배포·네트워크 오류 → 대기 안내 */
+}
+function hpFetchLeads(){
+  if (window.__MOCK__){
+    var m = window.__MOCK__.homepageLeads;
+    return Promise.resolve((m && m.ok && Array.isArray(m.leads)) ? m.leads : null);
+  }
+  if (hpLeadsCache && (Date.now()-hpLeadsCache.t) < HP_TTL) return Promise.resolve(hpLeadsCache.data);
+  return fetch(GAS_URL+"?action=leads&key="+encodeURIComponent(KEY)+"&limit=20&t="+Date.now(), { cache:"no-store" })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (j && j.error === "unauthorized"){ keyRejected("접속 키가 거부되었습니다. 다시 입력해 주세요."); return "unauthorized"; }
+      var d = (j && j.ok && Array.isArray(j.leads)) ? j.leads : null;
+      if (d) hpLeadsCache = { t: Date.now(), data: d };
+      return d;
+    })
+    .catch(function(){ return null; });
+}
+
+/* 일별 방문자 막대 (barChartSVG와 같은 축·그리드·툴팁 문법, 단일 시리즈).
+   년(365) 보기는 월 단위로 묶는다 — 365개 막대는 읽을 수 없다. */
+function hpChartSVG(days, period){
+  var buckets = days || [];
+  if (period === 365){
+    var byM = {}, ord = [];
+    buckets.forEach(function(d){
+      var m = String(d.date||"").slice(0,7);
+      if (!byM[m]){ byM[m] = { date:m, pageviews:0, visitors:0, leads:0 }; ord.push(m); }
+      byM[m].pageviews += Number(d.pageviews)||0;
+      byM[m].visitors  += Number(d.visitors)||0;
+      byM[m].leads     += Number(d.leads)||0;
+    });
+    buckets = ord.map(function(k){ return byM[k]; });
+  }
+  if (!buckets.length) return "<div class='empty'>표시할 방문 데이터가 없습니다.</div>";
+  var W=720, H=260, padL=46, padR=16, padT=16, padB=36;
+  var plotW=W-padL-padR, plotH=H-padT-padB, yb=padT+plotH;
+  var maxV=1; buckets.forEach(function(b){ maxV=Math.max(maxV, Number(b.visitors)||0); });
+  var step=Math.pow(10, Math.floor(Math.log(maxV)/Math.LN10));
+  var maxY=Math.ceil(maxV/step)*step; if (maxY<maxV*1.05) maxY+=step;
+  function yOf(v){ return yb-(v/maxY)*plotH; }
+  var s="<svg class='bars' viewBox='0 0 "+W+" "+H+"' role='img'>";
+  for (var g=0; g<=4; g++){
+    var v=maxY*g/4, y=yOf(v);
+    s+="<line x1='"+padL+"' y1='"+y+"' x2='"+(W-padR)+"' y2='"+y+"' class='"+(g===0?"zero-line":"grid-line")+"'></line>";
+    s+="<text x='"+(padL-8)+"' y='"+(y+4)+"' text-anchor='end' class='axis-txt'>"+comma(v)+"</text>";
+  }
+  var groupW=plotW/buckets.length, barW=Math.max(2, Math.min(40, groupW*0.62));
+  var lblEvery = buckets.length<=13 ? 1 : Math.ceil(buckets.length/10);
+  buckets.forEach(function(b,i){
+    var x = padL + groupW*i + (groupW-barW)/2;
+    var vis = Number(b.visitors)||0;
+    var h = (vis/maxY)*plotH, y = yb-h;
+    var lbl = period===365 ? esc(String(b.date).slice(2).replace("-","/")) : esc(String(b.date).slice(5));
+    s+="<rect class='bar-rect' x='"+x+"' y='"+y+"' width='"+barW+"' height='"+Math.max(h, vis>0?1:0)+"' rx='3' fill='var(--accent)' data-tip=\"<b>"+lbl+"</b><div class=&#39;tt-row&#39;><span>방문자</span><span>"+comma(vis)+"</span></div><div class=&#39;tt-row&#39;><span>페이지뷰</span><span>"+comma(b.pageviews)+"</span></div><div class=&#39;tt-row&#39;><span>리드</span><span>"+comma(b.leads)+"</span></div>\"></rect>";
+    if (i % lblEvery === 0){
+      s+="<text x='"+(x+barW/2)+"' y='"+(yb+20)+"' text-anchor='middle' class='axis-txt'>"+lbl+"</text>";
+    }
+  });
+  s+="</svg>";
+  return s;
+}
+
+/* 요약 카드 5장 — 기준 데이터는 period=365 응답 하나(오늘·주간은 그 꼬리에서 계산) */
+function hpCardsHTML(s){
+  var days = s.days||[];
+  var today = days.length ? (Number(days[days.length-1].visitors)||0) : 0;
+  var week = 0;
+  for (var i=Math.max(0, days.length-7); i<days.length; i++) week += Number(days[i].visitors)||0;
+  var t = s.totals||{};
+  var rate = (Number(s.conversionRate)||0)*100;
+  return "<div class='kpi'><div class='label'>오늘 방문</div><div class='big tnum'>"+comma(today)+"</div><div class='meta'>방문자 기준</div></div>"+
+    "<div class='kpi'><div class='label'>이번 주 방문</div><div class='big tnum'>"+comma(week)+"</div><div class='meta'>최근 7일 방문자</div></div>"+
+    "<div class='kpi'><div class='label'>누적 방문</div><div class='big tnum'>"+comma(t.visitors)+"</div><div class='meta'>최근 1년 방문자</div></div>"+
+    "<div class='kpi k-ar'><div class='label'>리드</div><div class='big tnum'>"+comma(t.leads)+"</div><div class='meta'>최근 1년 · 견적+문의</div></div>"+
+    "<div class='kpi k-profit'><div class='label'>방문→리드 전환율</div><div class='big tnum'>"+rate.toFixed(1)+"<small>%</small></div><div class='meta'>리드 ÷ 방문자 (1년)</div></div>";
+}
+
+function hpChipsHTML(){
+  return [[7,"1주"],[30,"1달"],[365,"년"]].map(function(p){
+    return "<button class='proj-chip"+(p[0]===hpPeriod?" on":"")+"' data-hp-period='"+p[0]+"'>"+p[1]+"</button>";
+  }).join("");
+}
+
+function hpLeadsHTML(rows){
+  if (!rows.length) return "<div class='empty'>아직 수집된 리드가 없습니다.</div>";
+  var h = "<table><thead><tr><th>일시</th><th>유형</th><th>이름</th><th>회사</th><th>이메일</th><th class='r'>예산·금액</th><th>상태</th></tr></thead><tbody>";
+  rows.forEach(function(r){
+    var isEst = r.source==="estimate";
+    var money = isEst ? (r.amountText || (r.amountMedian ? comma(r.amountMedian)+"원" : "")) : (r.budget||"");
+    h += "<tr><td class='tnum'>"+esc(String(r.submittedAt||"").slice(0,16).replace("T"," "))+"</td>"+
+      "<td><span class='chip "+(isEst?"pos":"wait")+"'>"+(isEst?"견적":"문의")+"</span></td>"+
+      "<td>"+esc(r.name||"")+"</td><td>"+esc(r.company||"")+"</td><td>"+esc(r.email||"")+"</td>"+
+      "<td class='r tnum'><span class='money'>"+esc(money)+"</span></td>"+
+      "<td>"+esc(r.status||"신규")+"</td></tr>";
+  });
+  return h+"</tbody></table>";
+}
+
+/* 수신부 미배포 안내 — 자세한 절차는 홈페이지 저장소 docs/specs/dashboard-visits.md 5번 절 */
+function hpWaitingHTML(){
+  return "<section class='panel' style='background:transparent;border:0;box-shadow:none'><div class='placeholder'>"+
+    "<div class='ico'>📡</div><h3>데이터 수신 대기 중</h3>"+
+    "<p>Apps Script 수신부가 아직 연결되지 않았습니다. 연결 순서:<br>"+
+    "① 리드 스프레드시트에 <b>visits_raw · visits_daily · leads</b> 시트 생성 → "+
+    "② Apps Script에 수신 코드 붙여넣기 → ③ <b>\"새 버전\"으로 재배포</b> (새 배포 아님) → "+
+    "④ Vercel에 <b>VISIT_WEBHOOK_URL</b> 등록.<br>"+
+    "자세한 방법: 홈페이지 저장소 <b>docs/specs/dashboard-visits.md</b> 5번 절 (대표가 할 일)</p></div></section>";
+}
+
+function hpPaintChart(sd){
+  var box = C.querySelector("[data-hp-chart]"), sum = C.querySelector("[data-hp-sum]");
+  if (!box) return;
+  if (!sd){ box.innerHTML = "<div class='empty'>이 기간의 데이터를 불러오지 못했습니다.</div>"; if (sum) sum.textContent=""; return; }
+  box.innerHTML = hpChartSVG(sd.days||[], Number(sd.period)||hpPeriod);
+  if (sum){
+    var t = sd.totals||{};
+    sum.innerHTML = "방문자 <b style='color:var(--ink)'>"+comma(t.visitors)+"</b> · 페이지뷰 "+comma(t.pageviews)+" · 리드 "+comma(t.leads);
+  }
+}
+
+function renderHomepage(){
+  var html = pageHead("homepage", "apple-seed.co.kr 방문 · 리드 현황 (Asia/Seoul 일별 집계)", "");
+  html += "<div data-hp-body><div class='empty' style='padding:60px 20px'>방문 통계를 불러오는 중…</div></div>";
+  C.innerHTML = html;
+  hpLoad();
+}
+
+function hpLoad(){
+  var want = hpPeriod;
+  Promise.all([ hpFetchStats(365), want===365 ? Promise.resolve(null) : hpFetchStats(want), hpFetchLeads() ]).then(function(res){
+    if (curRoute() !== "homepage") return;                      /* 화면을 떠났으면 그리지 않음 */
+    var body = C.querySelector("[data-hp-body]"); if (!body) return;
+    if (res[0]==="unauthorized" || res[1]==="unauthorized" || res[2]==="unauthorized") return;  /* 키 게이트가 이미 떴음 */
+    var base = res[0], leads = res[2];
+    if (!base){ body.innerHTML = hpWaitingHTML(); return; }
+    body.innerHTML =
+      "<div class='kpis hp5'>"+hpCardsHTML(base)+"</div>"+
+      "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>방문 추이</div><h3>일별 방문자</h3></div>"+
+      "<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'><span class='sec-note' data-hp-sum></span>"+hpChipsHTML()+"</div></div>"+
+      "<div class='chart-body'><div class='chart-scroll' data-hp-chart></div></div></section>"+
+      "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>리드</div><h3>최근 리드 (견적·문의)</h3></div><div class='sec-note'>최근 20건</div></div>"+
+      "<div class='tbl-scroll'>"+(leads ? hpLeadsHTML(leads) : "<div class='empty'>리드 데이터를 아직 받지 못했습니다. 수신부 연결 후 표시됩니다.</div>")+"</div></section>";
+    hpPaintChart(want===365 ? base : res[1]);
+    body.querySelectorAll("[data-hp-period]").forEach(function(b){
+      b.onclick = function(){
+        hpPeriod = Number(b.getAttribute("data-hp-period"));
+        var p = hpPeriod;
+        body.querySelectorAll("[data-hp-period]").forEach(function(c){ c.classList.toggle("on", Number(c.getAttribute("data-hp-period"))===p); });
+        var box = body.querySelector("[data-hp-chart]");
+        if (box) box.innerHTML = "<div class='empty'>불러오는 중…</div>";
+        hpFetchStats(p).then(function(sd){
+          if (curRoute() !== "homepage" || sd === "unauthorized") return;
+          if (p !== hpPeriod) return;                           /* 그 사이 다른 기간을 눌렀으면 폐기 */
+          hpPaintChart(sd);
+        });
+      };
+    });
+    applyMask();
+  });
+}
+
 var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
   memos:renderMemos, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
   newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov,
-  subs:renderSubs, library:renderLibrary
+  subs:renderSubs, library:renderLibrary, homepage:renderHomepage
 };
 /* 접속 키 입력 화면 — 키가 없거나 서버가 거부했을 때 */
 function renderKeyGate(){
