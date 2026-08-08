@@ -852,6 +852,7 @@
       <button id="maskBtn" title="금액 가리기 (화면공유용)">🙈 마스킹</button>
       <button id="themeBtn" title="테마 전환">◐ 테마</button>
       <button id="reloadBtn" title="데이터 새로고침">↻ 새로고침</button>
+      <button id="lockBtn" title="이 브라우저에 저장된 접속 키 삭제 (공용 기기에서 사용 후)">🔒 키 삭제</button>
     </div>
   </aside>
   <div class="backdrop" id="backdrop"></div>
@@ -869,14 +870,51 @@
 (function(){
 "use strict";
 
-/* ============ 접근 키 ============ */
-var MASTER_KEY = "72ddd03745f902086cd1eea4"; /* 내장 마스터 키 */
+/* ============ 접근 키 ============
+   키는 이 파일에 두지 않는다(저장소가 공개이므로).
+   URL(?key=) → localStorage 순으로 찾고, 둘 다 없으면 입력 화면을 띄운다.
+   URL로 들어온 키는 저장한 뒤 주소창에서 지운다 — URL은 히스토리·referrer·
+   스크린샷·화면공유에 그대로 남는다. */
+var KEY_LS = "appleseed_key";
 var qs = new URLSearchParams(location.search);
-var KEY = qs.get("key") || localStorage.getItem("appleseed_key") || MASTER_KEY;
-if (qs.get("key")) localStorage.setItem("appleseed_key", qs.get("key"));
+var KEY = "";
+(function resolveKey(){
+  var fromUrl = (qs.get("key") || "").trim();
+  if (fromUrl){
+    KEY = fromUrl;
+    try { localStorage.setItem(KEY_LS, KEY); } catch(e){}
+    qs.delete("key");
+    var q = qs.toString();
+    try {
+      history.replaceState(null, "", location.pathname + (q ? "?" + q : "") + location.hash);
+    } catch(e){}
+    return;
+  }
+  try { KEY = (localStorage.getItem(KEY_LS) || "").trim(); } catch(e){ KEY = ""; }
+})();
+function setKey(v){
+  KEY = String(v||"").trim();
+  try { localStorage.setItem(KEY_LS, KEY); } catch(e){}
+}
+function clearKey(){
+  KEY = "";
+  try { localStorage.removeItem(KEY_LS); } catch(e){}
+}
+/* 서버가 키를 거부했을 때: 키를 버리고 입력 화면으로 되돌린 뒤, 재시도하지 말라고 표시한 오류를 만든다 */
+function keyRejected(msg){
+  clearKey();
+  state.data = null;
+  state.loading = false;
+  state.error = null;
+  state.keyError = msg;
+  try { render(); } catch(e){}
+  var err = new Error(msg);
+  err.keyRejected = true;
+  return err;
+}
 
 /* ============ 상태 ============ */
-var state = { data:null, mask: localStorage.getItem("appleseed_mask")==="1", loading:true, error:null };
+var state = { data:null, mask: localStorage.getItem("appleseed_mask")==="1", loading:true, error:null, keyError:null };
 
 /* ============ 유틸 ============ */
 function esc(s){ s = (s==null?"":String(s));
@@ -1075,21 +1113,23 @@ async function deleteAttachmentItem(projectId, curAtts, index, projectName, onDo
 
 async function loadData(){
   if (window.__MOCK__){ state.data = window.__MOCK__; state.loading=false; return; }
+  if (!KEY){ state.loading = false; return; }   /* 키 입력 대기 — render()가 입력 화면을 띄운다 */
   var startedAt = Date.now();
-  var reqKey = KEY || MASTER_KEY;
   /* &t= 캐시버스터: 쓰기 직후 재조회가 브라우저/중간 캐시에 걸리지 않게 */
-  var r = await fetch(GAS_URL + "?action=data&key=" + encodeURIComponent(reqKey) + "&t=" + Date.now(), { cache: "no-store" });
+  var r = await fetch(GAS_URL + "?action=data&key=" + encodeURIComponent(KEY) + "&t=" + Date.now(), { cache: "no-store" });
   if (!r.ok){ throw new Error("HTTP "+r.status); }
   var j = await r.json().catch(function(){ return {}; });
-  
-  /* 저장된 키가 무효/구버전인 경우 마스터 키로 자동 복구 후 재시도 */
-  if (j && j.error === "unauthorized" && reqKey !== MASTER_KEY){
-    localStorage.removeItem("appleseed_key");
-    KEY = MASTER_KEY;
-    r = await fetch(GAS_URL + "?action=data&key=" + encodeURIComponent(MASTER_KEY) + "&t=" + Date.now(), { cache: "no-store" });
-    if (r.ok) j = await r.json().catch(function(){ return {}; });
+
+  /* 저장된 키가 무효/구버전이면 지우고 입력 화면으로 되돌린다 (대체할 내장 키는 없다) */
+  if (j && j.error === "unauthorized"){
+    clearKey();
+    state.data = null;
+    state.loading = false;
+    state.error = null;
+    state.keyError = "접속 키가 올바르지 않습니다. 다시 입력해 주세요.";
+    return;
   }
-  
+
   if (j && j.error) throw new Error(j.error);
   /* 이 조회가 시작된 뒤에 변이가 있었다면(또는 변이 진행 중) 낡은 스냅샷이므로 버림 */
   if (startedAt < lastMutationAt){ state.loading = false; return; }
@@ -1102,7 +1142,8 @@ async function loadData(){
 async function apiSend(method, table, id, body){
   if (window.__MOCK__){ alert("목 모드: 저장은 실서버에서만 동작합니다."); return null; }
   var action = method==="POST"?"insert":method==="PATCH"?"update":"delete";
-  var reqKey = KEY || MASTER_KEY;
+  if (!KEY){ throw keyRejected("접속 키가 없습니다. 다시 입력해 주세요."); }
+  var reqKey = KEY;
   var payload = { key: reqKey, action: action, table: table, id: id || null, row: body || null };
   if (body && typeof body === "object" && body.action){
     payload = Object.assign({ key: reqKey }, body);
@@ -1124,23 +1165,16 @@ async function apiSend(method, table, id, body){
       var j = {};
       try { j = JSON.parse(txt); } catch(e){}
       
-      if (j && j.error === "unauthorized" && reqKey !== MASTER_KEY){
-        localStorage.removeItem("appleseed_key");
-        KEY = MASTER_KEY;
-        payload.key = MASTER_KEY;
-        r = await fetch(targetUrl, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify(payload)
-        });
-        txt = await r.text();
-        try { j = JSON.parse(txt); } catch(e){}
+      /* 키가 거부되면 재시도해도 같은 결과 — 키를 지우고 입력 화면으로 되돌린다 */
+      if (j && j.error === "unauthorized"){
+        throw keyRejected("접속 키가 거부되었습니다. 다시 입력해 주세요.");
       }
-      
+
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
       if (j && j.error) throw new Error(j.error);
       return j;
     } catch(err){
+      if (err && err.keyRejected) throw err;
       lastErr = err;
       attempts++;
       if (attempts < 3) await new Promise(function(res){ setTimeout(res, 800); });
@@ -4731,18 +4765,49 @@ var ROUTES = {
   newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov,
   subs:renderSubs, library:renderLibrary
 };
+/* 접속 키 입력 화면 — 키가 없거나 서버가 거부했을 때 */
+function renderKeyGate(){
+  C.innerHTML = "<div class='placeholder' style='margin:40px auto;max-width:460px'>"+
+    "<div class='ico'>🔑</div><h3>접속 키를 입력하세요</h3>"+
+    "<p style='margin-bottom:18px'>"+
+    (state.keyError ? esc(state.keyError) : "관리 시스템을 열려면 접속 키가 필요합니다.")+
+    "<br>키는 이 브라우저에만 저장되고, 다음 접속부터 자동 적용됩니다.</p>"+
+    "<div class='fld' style='max-width:320px;margin:0 auto;text-align:left'>"+
+    "<label for='keyGateInput'>접속 키</label>"+
+    "<input id='keyGateInput' type='password' autocomplete='off' spellcheck='false' placeholder='접속 키 붙여넣기'>"+
+    "</div>"+
+    "<div style='margin-top:16px'><button class='btn primary' id='keyGateBtn'>접속</button></div>"+
+    "</div>";
+  var inp = C.querySelector("#keyGateInput");
+  var btn = C.querySelector("#keyGateBtn");
+  function submit(){
+    var v = (inp.value||"").trim();
+    if (!v){ inp.focus(); return; }
+    setKey(v);
+    state.keyError = null; state.error = null; state.loading = true;
+    render();
+    loadData().then(render).catch(function(e){
+      state.loading = false; state.error = e.message; render();
+    });
+  }
+  btn.onclick = submit;
+  inp.onkeydown = function(e){ if (e.key === "Enter"){ e.preventDefault(); submit(); } };
+  inp.focus();
+}
+
 function render(){
   var route = curRoute();
   buildNav();
   C.classList.toggle("crm-wide", route==="projects");
   var tb = document.querySelector(".tb-title"); if(tb) tb.textContent = TITLES[route]||"애플시드";
+  if (!KEY && !window.__MOCK__){ renderKeyGate(); return; }
   if (state.loading){ C.innerHTML = "<div class='empty' style='padding:80px 20px'>데이터를 불러오는 중…</div>"; return; }
   if (state.error){
     C.innerHTML = "<div class='placeholder' style='margin:40px auto;max-width:520px'><div class='ico'>⚠️</div><h3>데이터를 불러오지 못했습니다</h3><p style='margin-bottom:16px;'>"+esc(state.error)+"</p><button class='btn primary' id='resetKeyRetryBtn'>🔄 접속 키 초기화 및 재접속</button></div>";
     var btn = C.querySelector("#resetKeyRetryBtn");
     if (btn){
       btn.onclick = function(){
-        localStorage.removeItem("appleseed_key");
+        clearKey();
         location.href = location.pathname;
       };
     }
@@ -4772,6 +4837,13 @@ document.getElementById("reloadBtn").onclick = async function(){
   this.textContent = "↻ …";
   try{ state.error=null; await loadData(); }catch(e){ state.error=e.message; }
   render(); this.textContent = "↻ 새로고침";
+};
+document.getElementById("lockBtn").onclick = async function(){
+  var ok = await confirmDlg("이 브라우저에 저장된 접속 키를 삭제합니다. 다시 열려면 키를 입력해야 합니다.", "키 삭제", "접속 키 삭제");
+  if (!ok) return;
+  clearKey();
+  state.data = null; state.loading = false; state.error = null; state.keyError = null;
+  render();
 };
 document.getElementById("hamb").onclick = function(){ document.body.classList.toggle("nav-open"); };
 document.getElementById("backdrop").onclick = function(){ document.body.classList.remove("nav-open"); };
