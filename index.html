@@ -1373,7 +1373,7 @@ document.addEventListener("mousemove", function(e){
 /* ============ 메뉴 ============ */
 var MENU = [
   { cap:"현황", items:[ ["dashboard","📊","대시보드",0] ] },
-  { cap:"업무", items:[ ["todos","✅","할일관리",0], ["calendar","📅","일정관리",0], ["meetings","🎙️","전사록",0], ["memos","📝","메모관리",0], ["mail","✉️","메일관리",1] ] },
+  { cap:"업무", items:[ ["todos","✅","할일관리",0], ["calendar","📅","일정관리",0], ["meetings","🎙️","전사록",0], ["memos","📝","메모관리",0], ["mail","✉️","메일관리",0] ] },
   { cap:"영업", items:[ ["clients","🤝","고객관리",0], ["projects","🎬","프로젝트관리",0], ["homepage","🌐","홈페이지",0] ] },
   { cap:"재무", items:[ ["revenue","💰","매출관리",0], ["deposits","🏦","입금관리",0], ["expenses","🧾","지출관리",0], ["profit","📈","영업이익분석",0], ["subs","🔁","AI 구독관리",0],
       ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",1] ] },
@@ -5041,9 +5041,92 @@ function hpLoad(){
   });
 }
 
+/* ============ 메일관리 — 대표 지메일 받은편지함 (읽기 전용) ============
+   수신부 action=mail 이 어드민 이메일 일치만 통과시킨다(등급으로 열지 않음 — 개인 메일함).
+   화면에서도 같은 게이트를 걸어 오해가 없게 한다. 답장·삭제는 지원하지 않는다. */
+var mailQuery = "in:inbox";
+
+function mailFetch(q){
+  if (!AUTH.user) return Promise.reject(new Error("로그인이 필요합니다."));
+  return AUTH.user.getIdToken().then(function(token){
+    return fetch(RECEIVER_URL+"?action=mail&q="+encodeURIComponent(q)+"&limit=30"+
+      "&idToken="+encodeURIComponent(token)+"&t="+Date.now(), { cache:"no-store" });
+  }).then(function(r){ return r.json(); });
+}
+function mailErrText(code){
+  if (code === "forbidden" || code === "unauthorized") return "이 계정에는 메일 열람 권한이 없습니다. 대표 계정으로 로그인하십시오.";
+  return "메일을 불러오지 못했습니다: " + String(code || "알 수 없는 오류");
+}
+function mailDateText(iso){
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  try{
+    return new Intl.DateTimeFormat("ko-KR",{ timeZone:"Asia/Seoul", month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" }).format(d);
+  }catch(e){ return String(iso).slice(0,16).replace("T"," "); }
+}
+function mailSafeLink(u){ return /^https:\/\/mail\.google\.com\//.test(String(u||"")) ? String(u) : ""; }
+
+function mailRowsHTML(list){
+  if (!list.length) return "<div class='empty'>받은 메일이 없습니다.</div>";
+  var h = "<table><thead><tr><th style='width:110px'>날짜</th><th style='width:200px'>발신자</th><th>제목</th></tr></thead><tbody>";
+  list.forEach(function(m){
+    var link = mailSafeLink(m.link);
+    var who = String(m.fromName||"").trim() || String(m.from||"");
+    h += "<tr"+(link?" data-mail-open='"+esc(link)+"' style='cursor:pointer'":"")+">"+
+      "<td class='tnum' style='color:var(--ink-3)'>"+esc(mailDateText(m.date))+"</td>"+
+      "<td>"+(m.starred?"★ ":"")+esc(who)+"</td>"+
+      "<td><div style='font-weight:"+(m.unread?"700":"400")+"'>"+esc(m.subject||"(제목 없음)")+"</div>"+
+      "<div style='color:var(--ink-3); font-size:12.5px; margin-top:3px'>"+esc(m.snippet||"")+"</div></td></tr>";
+  });
+  return h+"</tbody></table>";
+}
+
+function renderMail(){
+  var html = pageHead("mail", "지메일 받은편지함을 읽어옵니다. 답장은 지메일에서 하십시오.", "");
+  if (!AUTH.isAdmin){
+    html += "<section class='panel' style='background:transparent;border:0;box-shadow:none'>"+
+      "<div class='placeholder'><div class='ico'>🔒</div><h3>권한 없음</h3>"+
+      "<p>메일관리는 대표 계정(어드민)만 열람할 수 있습니다.</p></div></section>";
+    C.innerHTML = html;
+    return;
+  }
+  html += "<div class='ct-controls'>"+
+    "<input class='proj-search' type='text' placeholder='지메일 검색어 (예: in:inbox is:unread)' data-mail-q>"+
+    "<button class='btn primary' data-mail-load>불러오기</button></div>";
+  html += "<section class='panel'><div class='tbl-scroll' data-mail-body><div class='empty'>메일을 불러오는 중…</div></div></section>";
+  C.innerHTML = html;
+
+  var qEl = C.querySelector("[data-mail-q]");
+  qEl.value = mailQuery;
+
+  function paint(inner){
+    var b = C.querySelector("[data-mail-body]"); if (!b) return;
+    b.innerHTML = inner;
+    b.querySelectorAll("[data-mail-open]").forEach(function(tr){
+      tr.onclick = function(){ window.open(tr.getAttribute("data-mail-open"), "_blank", "noopener"); };
+    });
+  }
+  function load(){
+    mailQuery = (qEl.value||"").trim() || "in:inbox";
+    var want = mailQuery;
+    paint("<div class='empty'>메일을 불러오는 중…</div>");
+    mailFetch(want).then(function(j){
+      if (curRoute() !== "mail" || want !== mailQuery) return;   /* 화면을 떠났거나 검색어가 바뀌었으면 폐기 */
+      if (!j || j.error) { paint("<div class='empty'>"+esc(mailErrText(j && j.error))+"</div>"); return; }
+      paint(mailRowsHTML(j.mails || []));
+    }).catch(function(err){
+      if (curRoute() !== "mail" || want !== mailQuery) return;
+      paint("<div class='empty'>"+esc(mailErrText(err && err.message || err))+"</div>");
+    });
+  }
+  C.querySelector("[data-mail-load]").onclick = load;
+  qEl.onkeydown = function(e){ if (e.key === "Enter"){ e.preventDefault(); load(); } };
+  load();
+}
+
 var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
-  memos:renderMemos, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
+  memos:renderMemos, mail:renderMail, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
   newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov,
   subs:renderSubs, library:renderLibrary, homepage:renderHomepage
