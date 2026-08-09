@@ -811,6 +811,65 @@
   .dhp-num .v small{font-size:13px; font-weight:700; color:var(--ink-2); margin-left:1px;}
   .dhp-src{margin-top:16px; padding-top:14px; border-top:1px solid var(--line);}
 
+  /* ===== 메일관리 =====
+     새 클래스는 최소로. 칩·버튼·패널은 기존 언어(.proj-chip/.btn/.panel/.modal)를 그대로 쓴다. */
+  .mail-filters{padding:16px 20px; display:flex; flex-direction:column; gap:12px;}
+  .mail-frow{display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
+  .mail-flabel{font-size:11px; letter-spacing:.12em; text-transform:uppercase;
+    color:var(--ink-3); font-weight:700; width:44px; flex:none;}
+  .mail-search{display:flex; align-items:center; gap:8px; flex:1 1 260px; min-width:0; flex-wrap:wrap;}
+  .mail-search .proj-search{flex:1 1 200px; min-width:0; max-width:420px;}
+  .mail-adv{border-top:1px solid var(--line); padding:10px 20px 12px;}
+  .mail-adv summary{cursor:pointer; font-size:12px; color:var(--ink-3); list-style:none;}
+  .mail-adv summary::-webkit-details-marker{display:none;}
+  .mail-adv summary::before{content:"▸ "; }
+  .mail-adv[open] summary::before{content:"▾ "; }
+  .mail-adv code{display:block; margin-top:8px; font-size:11.5px; line-height:1.6; color:var(--ink-2);
+    background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:9px 11px;
+    word-break:break-all; white-space:pre-wrap;}
+  .mail-note{padding:11px 20px 0; font-size:12.5px; color:var(--ink-3);}
+  .mail-body.busy{opacity:.45; pointer-events:none; transition:opacity .12s;}
+  .mail-pager{display:flex; flex-wrap:wrap; align-items:center; gap:6px;
+    padding:12px 20px 16px; border-top:1px solid var(--line);}
+  .mail-pager .pg{border:1px solid var(--line-strong); background:var(--surface-2); color:var(--ink-2);
+    border-radius:9px; padding:5px 11px; font-size:12.5px; font-weight:700; cursor:pointer; font-family:var(--font);}
+  .mail-pager .pg:hover:not(:disabled){border-color:var(--accent); color:var(--ink);}
+  .mail-pager .pg.on{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .mail-pager .pg:disabled{opacity:.35; cursor:default;}
+  .mail-pager .gap{color:var(--ink-3); padding:0 2px; font-size:12.5px;}
+  .mail-dot{display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--accent);
+    margin-right:6px; vertical-align:middle;}
+  .mail-from-m{display:none;}
+  .mail-msg{border:1px solid var(--line); border-radius:12px; background:var(--surface-2); overflow:hidden;}
+  .mail-msg + .mail-msg{margin-top:12px;}
+  .mail-msg-h{padding:11px 14px; border-bottom:1px solid var(--line); font-size:12.5px; line-height:1.6;}
+  .mail-msg-h b{font-size:13px;}
+  .mail-msg-h .em{color:var(--ink-3);}
+  .mail-msg iframe{display:block; width:100%; border:0; background:#fff;}
+  .mail-warn{font-size:12px; color:var(--pending); padding:8px 14px; background:var(--surface);
+    border-top:1px solid var(--line);}
+  /* 모달 헤더 — 긴 제목이 버튼을 밀어내지 않게 */
+  .mail-modal .modal-h h3{word-break:break-word; overflow-wrap:anywhere; line-height:1.4;}
+  @media (max-width:640px){
+    .mail-flabel{width:auto;}
+    .mail-filters{padding:14px 14px;}
+    .mail-adv, .mail-pager, .mail-note{padding-left:14px; padding-right:14px;}
+    .mail-search{flex:1 1 100%;}
+    .mail-search .proj-search{flex:1 1 100%; max-width:none;}
+    /* 메일 표만 가로 스크롤을 풀고 발신자를 제목 아래로 접는다.
+       제목을 읽는 것이 이 화면의 목적인데 기본 min-width:520px 이면 제목이 잘린다. */
+    .mail-body table{min-width:0;}
+    .mail-body th:nth-child(2), .mail-body td:nth-child(2){display:none;}
+    .mail-body th:first-child, .mail-body td:first-child{width:74px;}
+    .mail-from-m{display:block; color:var(--ink-2); font-size:12.5px; margin-top:3px;}
+    /* 모달은 화면을 거의 채운다 — 375px 에서 여백에 밀려 본문이 좁아지면 읽을 수 없다 */
+    .mail-modal .modal-h{padding:14px 14px 12px; flex-wrap:wrap; gap:8px;}
+    .mail-modal .modal-h h3{font-size:14.5px;}
+    .mail-modal .modal-b{padding:14px;}
+    .mail-modal .modal-f{padding:12px 14px;}
+  }
+  @media (max-width:640px){ .mail-modal-bg{padding:2vh 8px;} }
+
   /* ===== AI 공모전 ===== */
   .ct-tabs{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;}
   .ct-controls{display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-bottom:18px;}
@@ -5227,19 +5286,80 @@ var MAIL_TABS = [
 ];
 function mailTabQuery(key){
   for (var i=0; i<MAIL_TABS.length; i++) if (MAIL_TABS[i].key === key) return MAIL_TABS[i].q;
-  return null;
+  return MAIL_TABS[0].q;
 }
 
-var mailQuery = mailTabQuery("전체");
+/* ── 기간 (대표 지시 2026-08-09 — "최근 1주일치가 나오게 하고 그 이상이면 6개월치")
+
+   기간은 반드시 "명시적 선택"이다. 마지막 페이지에서 몰래 6개월로 넓히는 식의 자동 확장은
+   넣지 않는다 — 지금 무엇을 보고 있는지 화면이 거짓말하게 되기 때문이다.
+   대표가 칩을 눌러야만 범위가 바뀌고, 바뀐 사실이 칩에 그대로 보인다. */
+var MAIL_RANGES = [
+  { key:"7d", label:"최근 1주일", q:"newer_than:7d" },
+  { key:"6m", label:"최근 6개월", q:"newer_than:6m" }
+];
+function mailRangeQuery(key){
+  for (var i=0; i<MAIL_RANGES.length; i++) if (MAIL_RANGES[i].key === key) return MAIL_RANGES[i].q;
+  return MAIL_RANGES[0].q;
+}
+
+/* ── 검색어 (대표 지시 2026-08-09 — "코드형식 말고 선택형식으로 쉽게, 검색기능도")
+
+   대표는 지메일 문법을 칠 이유가 없다. 화면에는 사람이 읽는 컨트롤(분류·기간·검색)만 두고,
+   지메일 쿼리는 여기 mailBuildQuery 한 곳에서만 조립한다.
+
+   입력값은 공백으로 쪼개 토큰마다 큰따옴표로 감싼다. 지메일은 따옴표 안을 리터럴로 보므로
+   ( ) - OR : 같은 연산자가 섞여도 쿼리가 깨지지 않는다.
+   따옴표 자체는 지메일에 이스케이프 문법이 없어서 제거한다(백슬래시도 함께).
+   토큰을 각각 감싸는 이유: 통째로 한 구절로 묶으면 "김 대표"가 그 순서 그대로 붙어 있는
+   메일만 걸린다. 사람이 검색창에 기대하는 것은 단어들의 AND 다. */
+function mailSearchTerm(raw){
+  var s = String(raw == null ? "" : raw).replace(/["\\]/g, " ").trim();
+  if (!s) return "";
+  var toks = s.split(/\s+/).filter(Boolean).slice(0, 8);
+  if (!toks.length) return "";
+  return toks.map(function(t){ return '"' + t.slice(0, 60) + '"'; }).join(" ");
+}
+
+/* 분류·기간·검색 → 실제 지메일 검색어. 쿼리를 만드는 곳은 여기 하나뿐이다(단일 출처). */
+function mailBuildQuery(tab, range, search){
+  var q = mailTabQuery(tab) + " " + mailRangeQuery(range);
+  var s = mailSearchTerm(search);
+  return s ? q + " " + s : q;
+}
+
+var MAIL_PAGE_SIZE = 20;   /* 대표 지시 — 한 페이지 20건 */
+
+/* 화면 상태. 쿼리 문자열에서 역산하지 않고 이 네 값이 단일 출처다
+   (검색창에서 쿼리가 사라졌으므로 역산할 대상 자체가 없다). */
+var mailTab    = "전체";
+var mailRange  = "7d";
+var mailSearch = "";
+var mailPage   = 1;
+
 var mailList = [];
 var mailDrafts = {};      /* threadId → 작성 중 본문. 발송 실패해도 날아가지 않게 보관 */
 var mailPreviewed = {};   /* threadId → 미리보기를 통과한 본문. 이것과 같아야만 보낼 수 있다 */
-var mailOpenId = null;    /* 펼쳐 둔 스레드 */
 
-function mailFetch(q){
+/* 페이징은 hasMore 로만 알 수 있다 — 전체 개수를 주는 API 가 없으므로 총 페이지 수를 모른다.
+   지어내지 않고 "확인된 만큼"만 그린다. */
+var mailHasMore = false;
+var mailMaxPage = 1;      /* 존재가 확인된 가장 큰 페이지 번호 */
+var mailPaging  = false;  /* 수신부가 hasMore 를 주는가. 옛 응답이면 false → 페이징을 숨긴다 */
+
+function mailFetch(q, start){
   if (!AUTH.user) return Promise.reject(new Error("로그인이 필요합니다."));
   return AUTH.user.getIdToken().then(function(token){
-    return fetch(RECEIVER_URL+"?action=mail&q="+encodeURIComponent(q)+"&limit=30"+
+    return fetch(RECEIVER_URL+"?action=mail&q="+encodeURIComponent(q)+
+      "&limit="+MAIL_PAGE_SIZE+"&start="+(start||0)+
+      "&idToken="+encodeURIComponent(token)+"&t="+Date.now(), { cache:"no-store" });
+  }).then(function(r){ return r.json(); });
+}
+/* 스레드 전문. 목록은 snippet 만 주므로 모달을 열 때 따로 받아온다. */
+function mailBodyFetch(id){
+  if (!AUTH.user) return Promise.reject(new Error("로그인이 필요합니다."));
+  return AUTH.user.getIdToken().then(function(token){
+    return fetch(RECEIVER_URL+"?action=mailBody&id="+encodeURIComponent(id)+
       "&idToken="+encodeURIComponent(token)+"&t="+Date.now(), { cache:"no-store" });
   }).then(function(r){ return r.json(); });
 }
@@ -5278,42 +5398,161 @@ var MAIL_TEXTAREA_CSS = "width:100%; box-sizing:border-box; min-height:170px; re
   " font-family:var(--font); font-size:13.5px; line-height:1.75;";
 
 function mailComposerHTML(m, idx){
-  var link = mailSafeLink(m.link);
-  return "<tr data-mail-detail='"+idx+"' style='display:none'><td colspan='3' style='background:var(--surface-2)'>"+
-    "<div style='padding:6px 2px 18px'>"+
-      "<div style='display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px'>"+
-        "<span style='color:var(--ink-3); font-size:12.5px'>회신 — 스레드에 이어 붙습니다.</span>"+
-        (link ? "<a class='btn sm' style='text-decoration:none' href='"+esc(link)+"' target='_blank' rel='noopener'>지메일에서 열기</a>" : "")+
-      "</div>"+
+  return "<div style='padding:2px 0 4px'>"+
+      "<div style='color:var(--ink-3); font-size:12.5px; margin-bottom:9px'>회신 — 이 스레드에 이어 붙습니다.</div>"+
       "<textarea data-mail-text='"+idx+"' style='"+MAIL_TEXTAREA_CSS+"' placeholder='회신 내용을 입력하십시오. 줄바꿈은 그대로 유지됩니다.'></textarea>"+
       "<div style='display:flex; gap:8px; flex-wrap:wrap; margin-top:10px'>"+
         "<button class='btn sm' data-mail-prev='"+idx+"'>미리보기</button>"+
         "<button class='btn primary' data-mail-send='"+idx+"' disabled>보내기</button>"+
-        "<button class='btn sm' data-mail-cancel='"+idx+"'>취소</button>"+
       "</div>"+
       "<div data-mail-status='"+idx+"' style='margin-top:10px; font-size:13px; color:var(--ink-3)'>보내기 전에 미리보기로 확인하십시오.</div>"+
       "<div data-mail-prevbox='"+idx+"' style='margin-top:12px'></div>"+
-    "</div></td></tr>";
+    "</div>";
 }
 
+/* 행은 훑어보기용으로만 남긴다 — 전문은 모달에서 본다(대표 지시: "한 줄로 말고 팝업으로").
+   안 읽은 메일은 점 + 굵은 제목으로 눈에 띄게 한다(unread 필드는 기존에도 오고 있었다). */
 function mailRowsHTML(list){
-  if (!list.length) return "<div class='empty'>받은 메일이 없습니다.</div>";
-  var h = "<table><thead><tr><th style='width:110px'>날짜</th><th style='width:200px'>발신자</th><th>제목</th></tr></thead><tbody>";
+  if (!list.length) return "<div class='empty'>조건에 맞는 메일이 없습니다.</div>";
+  var h = "<table><thead><tr><th style='width:104px'>날짜</th><th style='width:190px'>발신자</th><th>제목</th></tr></thead><tbody>";
   list.forEach(function(m, i){
     var who = String(m.fromName||"").trim() || String(m.from||"");
     h += "<tr data-mail-row='"+i+"' style='cursor:pointer'>"+
       "<td class='tnum' style='color:var(--ink-3)'>"+esc(mailDateText(m.date))+"</td>"+
       "<td>"+(m.starred?"★ ":"")+esc(who)+"</td>"+
-      "<td><div style='font-weight:"+(m.unread?"700":"400")+"'>"+esc(m.subject||"(제목 없음)")+"</div>"+
+      "<td><div style='font-weight:"+(m.unread?"700":"400")+"'>"+
+        (m.unread?"<span class='mail-dot'></span>":"")+esc(m.subject||"(제목 없음)")+"</div>"+
+      /* 좁은 화면에서는 발신자 열을 접고 여기에 얹는다 — 가로로 밀어서 제목을 읽게 하지 않는다 */
+      "<div class='mail-from-m'>"+(m.starred?"★ ":"")+esc(who)+"</div>"+
       "<div style='color:var(--ink-3); font-size:12.5px; margin-top:3px'>"+esc(m.snippet||"")+"</div></td></tr>";
-    h += mailComposerHTML(m, i);
   });
   return h+"</tbody></table>";
 }
 
-/* 목록 한 건에 대한 회신 UI 배선. root 는 목록을 담은 컨테이너 */
-function bindMailComposer(root, m, idx){
-  var detail = root.querySelector("[data-mail-detail='"+idx+"']");
+/* ── 본문 렌더 — 남이 보낸 HTML 이다. 우리 문서에 절대 넣지 않는다.
+
+   1) sandbox="" 인 iframe 안에서만 렌더한다. 빈 문자열이면 스크립트·폼·팝업·상위 접근이 전부 막힌다.
+      allow-scripts 는 넣지 않는다 — 넣는 순간 <script> 와 onerror 가 살아난다.
+   2) 문서 안에 CSP 를 한 겹 더 건다. img-src 를 data: 로만 열어 원격 이미지·추적 픽셀을 막는다.
+      대표가 메일을 열었다는 사실이 발신자에게 새어 나가면 안 된다.
+   3) srcdoc 은 속성 문자열이 아니라 프로퍼티로 대입한다 — 따옴표·& 이스케이프 실수가 원천적으로 없다. */
+function mailFrameDoc(html){
+  return "<!doctype html><html><head><meta charset='utf-8'>"+
+    "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:;\">"+
+    "<style>html,body{margin:0;padding:12px 14px;background:#fff;color:#141414;"+
+      "font:14px/1.7 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;"+
+      "word-break:break-word;overflow-wrap:anywhere;}"+
+      "img{max-width:100%;height:auto;} table{max-width:100%;} a{color:#0b57d0;}</style>"+
+    "</head><body>"+html+"</body></html>";
+}
+/* 원격 자원을 실제로 참조할 때만 안내한다. 조용히 막으면 왜 이미지가 안 보이는지 모른다. */
+function mailHasRemote(html){
+  var s = String(html||"");
+  return /(?:src|background)\s*=\s*["']?\s*(?:https?:)?\/\//i.test(s) ||
+         /url\(\s*["']?\s*(?:https?:)?\/\//i.test(s);
+}
+/* sandbox 안에서는 높이를 알려줄 수 없다(스크립트가 막혀 있으므로).
+   글자 수로 어림잡고, 넘치면 iframe 안에서 스크롤하게 둔다. */
+function mailFrameHeight(src){
+  var n = String(src||"").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").length;
+  return Math.max(220, Math.min(600, Math.round(120 + n * 0.7)));
+}
+
+/* 스레드 한 통. iframe 은 DOM 을 만든 뒤 JS 로 붙인다(위 3번 이유). */
+function mailMessageNode(msg){
+  var who  = String(msg.fromName||"").trim();
+  var addr = String(msg.from||"");
+  var node = el("<div class='mail-msg'>"+
+    "<div class='mail-msg-h'><b>"+esc(who || addr)+"</b>"+
+      (who && addr ? " <span class='em'>&lt;"+esc(addr)+"&gt;</span>" : "")+
+      "<div class='em'>받는사람 "+esc(String(msg.to||"—"))+" · "+esc(mailDateText(msg.date))+"</div></div>"+
+    "<div data-body></div></div>");
+  var slot = node.querySelector("[data-body]");
+  var html = String(msg.html||"");
+  if (html){
+    var f = document.createElement("iframe");
+    f.setAttribute("sandbox", "");                 /* allow-scripts 를 넣지 말 것 */
+    f.setAttribute("referrerpolicy", "no-referrer");
+    f.style.height = mailFrameHeight(html) + "px";
+    f.srcdoc = mailFrameDoc(html);
+    slot.appendChild(f);
+    if (mailHasRemote(html)){
+      slot.appendChild(el("<div class='mail-warn'>원격 이미지는 차단했습니다 — 메일을 열었다는 사실이 발신자에게 전달되지 않습니다.</div>"));
+    }
+  } else {
+    /* 평문. 링크 자동변환은 하지 않는다 — linkify 는 유튜브 썸네일을 원격으로 불러와서
+       위 차단 원칙을 깬다. 그대로 보여주는 쪽이 정직하다. */
+    slot.appendChild(el("<div style=\"padding:12px 14px; white-space:pre-wrap; font-size:13.5px; line-height:1.75\">"+
+      esc(String(msg.text||"") || "(본문이 없습니다)")+"</div>"));
+  }
+  if (msg.truncated) slot.appendChild(el("<div class='mail-warn'>본문이 길어 잘렸습니다. 전문은 지메일에서 열어 확인하십시오.</div>"));
+  return node;
+}
+
+/* ── 본문 팝업. 기존 .modal-bg / .modal / .modal-h / .modal-b / .modal-f 를 그대로 쓴다. */
+function mailOpenModal(m, idx){
+  var link = mailSafeLink(m.link);
+  var bg = el("<div class='modal-bg mail-modal-bg' style='z-index:9999'>"+
+    "<div class='modal mail-modal' style='max-width:860px; width:96%'>"+
+      "<div class='modal-h'>"+
+        "<h3 style='flex:1; min-width:0; padding-right:10px'>"+esc(m.subject||"(제목 없음)")+"</h3>"+
+        "<div style='display:flex; gap:6px; align-items:center; flex:none'>"+
+          (link ? "<a class='btn sm' style='text-decoration:none' href='"+esc(link)+"' target='_blank' rel='noopener noreferrer'>지메일에서 열기</a>" : "")+
+          "<button type='button' class='icon-btn' data-mail-x>✕</button></div>"+
+      "</div>"+
+      "<div class='modal-b' style='max-height:74vh; gap:16px'>"+
+        "<div data-mail-thread><div class='empty' style='padding:26px 12px'>본문을 불러오는 중…</div></div>"+
+        "<div style='border-top:1px solid var(--line); padding-top:14px'>"+mailComposerHTML(m, idx)+"</div>"+
+      "</div>"+
+      "<div class='modal-f'><button type='button' class='btn ghost' data-mail-cancel='"+idx+"'>닫기</button></div>"+
+    "</div></div>");
+
+  document.body.style.overflow = "hidden";          /* 열려 있는 동안 배경 스크롤 잠금 */
+  var closed = false;
+  function close(){
+    if (closed) return; closed = true;
+    document.removeEventListener("keydown", onKey, true);
+    bg.remove();
+    /* 잠금 해제는 "열려 있던 값 복원"이 아니라 "남은 모달이 없을 때만 해제"다.
+       열린 채로 또 열리면 복원 방식은 hidden 을 hidden 으로 되돌려 영구히 잠긴다. */
+    if (!document.querySelector(".modal-bg")) document.body.style.overflow = "";
+  }
+  function onKey(e){ if (e.key === "Escape"){ e.stopPropagation(); close(); } }
+  document.addEventListener("keydown", onKey, true);
+  bg.querySelector("[data-mail-x]").onclick = close;
+  bg.onclick = function(e){ if (e.target === bg) close(); };   /* 배경 클릭 */
+
+  document.body.appendChild(bg);
+  bindMailComposer(bg, m, idx, close);
+
+  var slot = bg.querySelector("[data-mail-thread]");
+  mailBodyFetch(String(m.id||"")).then(function(j){
+    if (closed) return;
+    if (!j || j.error || !j.messages){
+      /* 수신부가 아직 mailBody 를 안 내놓았거나 스레드를 못 찾은 경우.
+         목록에 이미 있는 snippet 이라도 보여주고, 못 가져왔다는 사실을 밝힌다. */
+      slot.innerHTML = "";
+      slot.appendChild(el("<div class='mail-msg'><div class='mail-msg-h'><b>"+
+        esc(String(m.fromName||"").trim() || String(m.from||""))+"</b><div class='em'>"+
+        esc(mailDateText(m.date))+"</div></div>"+
+        "<div style='padding:12px 14px; white-space:pre-wrap; font-size:13.5px; line-height:1.75'>"+
+        esc(m.snippet||"")+"</div>"+
+        "<div class='mail-warn'>본문 전문을 불러오지 못했습니다 ("+esc(mailErrText(j && j.error))+"). 위는 목록 미리보기입니다.</div></div>"));
+      return;
+    }
+    slot.innerHTML = "";
+    if (j.omitted) slot.appendChild(el("<div class='mail-warn' style='border:1px solid var(--line); border-radius:10px; margin-bottom:12px'>"+
+      "이전 메시지 "+esc(String(j.omitted))+"통은 생략했습니다. 전문은 지메일에서 열어 확인하십시오.</div>"));
+    (j.messages||[]).forEach(function(msg){ slot.appendChild(mailMessageNode(msg)); });   /* 오래된 → 최신 */
+    if (!(j.messages||[]).length) slot.appendChild(el("<div class='empty'>본문이 없습니다.</div>"));
+  }).catch(function(err){
+    if (closed) return;
+    slot.innerHTML = "<div class='empty'>본문을 불러오지 못했습니다. "+esc(mailErrText(err && err.message || err))+"</div>";
+  });
+}
+
+/* 회신 UI 배선. root 는 모달(또는 회신 컨트롤을 담은 컨테이너), onClose 는 닫기 동작 */
+function bindMailComposer(root, m, idx, onClose){
   var ta     = root.querySelector("[data-mail-text='"+idx+"']");
   var prevBt = root.querySelector("[data-mail-prev='"+idx+"']");
   var sendBt = root.querySelector("[data-mail-send='"+idx+"']");
@@ -5321,7 +5560,7 @@ function bindMailComposer(root, m, idx){
   var stat   = root.querySelector("[data-mail-status='"+idx+"']");
   var box    = root.querySelector("[data-mail-prevbox='"+idx+"']");
   var tid    = String(m.id||"");
-  if (!detail || !ta) return;
+  if (!ta) return;
 
   ta.value = mailDrafts[tid] || "";
 
@@ -5385,14 +5624,39 @@ function bindMailComposer(root, m, idx){
     });
   };
 
-  cancBt.onclick = function(){ mailOpenId = null; detail.style.display = "none"; };
+  if (cancBt) cancBt.onclick = function(){ if (onClose) onClose(); };
   syncSend();
 }
 
+/* 페이지 번호 — 총 개수를 주는 API 가 없으므로 "확인된 만큼"만 그린다.
+   mailMaxPage 는 존재가 확인된 가장 큰 번호이고, hasMore 면 다음 하나를 더 보여준다. */
+function mailPagerHTML(){
+  if (!mailPaging) return "";                         /* 옛 응답(hasMore 없음) → 페이징을 숨긴다 */
+  var last = Math.max(mailMaxPage, mailPage + (mailHasMore ? 1 : 0));
+  if (last <= 1) return "";
+  var nums = [];
+  if (last <= 9){ for (var i=1; i<=last; i++) nums.push(i); }
+  else {
+    nums.push(1);
+    for (var k=mailPage-1; k<=mailPage+1; k++) if (k>1 && k<last) nums.push(k);
+    nums.push(last);
+    nums = nums.filter(function(v,i,a){ return a.indexOf(v)===i; }).sort(function(a,b){ return a-b; });
+  }
+  var h = "<button class='pg' data-mail-pg='"+(mailPage-1)+"'"+(mailPage<=1?" disabled":"")+">‹ 이전</button>";
+  var prev = 0;
+  nums.forEach(function(n){
+    if (prev && n > prev+1) h += "<span class='gap'>…</span>";
+    h += "<button class='pg"+(n===mailPage?" on":"")+"' data-mail-pg='"+n+"'>"+n+"</button>";
+    prev = n;
+  });
+  h += "<button class='pg' data-mail-pg='"+(mailPage+1)+"'"+(mailHasMore?"":" disabled")+">다음 ›</button>";
+  return h;
+}
+
 function renderMail(){
-  /* 설명문은 화면이 하는 일을 그대로 말한다 — 이제 받은편지함 전부가 아니라 걸러서 보여준다.
+  /* 설명문은 화면이 하는 일을 그대로 말한다 — 받은편지함 전부가 아니라 걸러서 보여준다.
      "받은편지함을 읽어옵니다"로 두면 안 보이는 메일이 없다고 오해한다. */
-  var html = pageHead("mail", "광고·뉴스레터를 뺀 지메일입니다. 탭으로 의뢰·결제·업무를 좁혀 보고, 메일을 열면 그 자리에서 회신할 수 있습니다.", "");
+  var html = pageHead("mail", "광고·뉴스레터를 뺀 지메일입니다. 분류·기간·검색으로 좁혀 보고, 메일을 누르면 전문이 열리며 그 자리에서 회신할 수 있습니다.", "");
   if (!AUTH.isAdmin){
     html += "<section class='panel' style='background:transparent;border:0;box-shadow:none'>"+
       "<div class='placeholder'><div class='ico'>🔒</div><h3>권한 없음</h3>"+
@@ -5400,73 +5664,139 @@ function renderMail(){
     C.innerHTML = html;
     return;
   }
-  html += "<div class='proj-chips' style='margin-bottom:10px' data-mail-tabs></div>";
-  html += "<div class='ct-controls'>"+
-    "<input class='proj-search' type='text' placeholder='지메일 검색어 (예: in:inbox is:unread)' data-mail-q>"+
-    "<button class='btn primary' data-mail-load>불러오기</button></div>";
-  html += "<section class='panel'><div class='tbl-scroll' data-mail-body><div class='empty'>메일을 불러오는 중…</div></div></section>";
+  /* 화면에는 사람이 읽는 컨트롤만 둔다(대표 지시 2026-08-09).
+     지메일 쿼리 원문은 "고급"에 접어 두되 없애지는 않는다 —
+     무엇을 보고 있는지 확인하고 싶을 때 확인할 수 있어야 한다. */
+  html += "<section class='panel'>"+
+      "<div class='mail-filters'>"+
+        "<div class='mail-frow'><span class='mail-flabel'>분류</span><div class='proj-chips' data-mail-tabs></div></div>"+
+        "<div class='mail-frow'><span class='mail-flabel'>기간</span><div class='proj-chips' data-mail-ranges></div></div>"+
+        "<div class='mail-frow'><span class='mail-flabel'>검색</span>"+
+          "<div class='mail-search'>"+
+            "<input class='proj-search' type='search' placeholder='이름·회사·제목으로 검색' data-mail-q>"+
+            "<button class='btn' data-mail-go>검색</button>"+
+            "<button class='btn sm ghost' data-mail-clear>지우기</button>"+
+            "<button class='btn sm ghost' data-mail-reload>새로고침</button>"+
+          "</div></div>"+
+      "</div>"+
+      "<details class='mail-adv'><summary>고급 · 실제 지메일 검색어</summary><code data-mail-raw></code></details>"+
+    "</section>";
+  html += "<section class='panel'>"+
+      "<div class='mail-note' data-mail-note></div>"+
+      "<div class='tbl-scroll mail-body' data-mail-body><div class='empty'>메일을 불러오는 중…</div></div>"+
+      "<div class='mail-pager' data-mail-pager style='display:none'></div>"+
+    "</section>";
   C.innerHTML = html;
 
-  var qEl = C.querySelector("[data-mail-q]");
-  var tabsEl = C.querySelector("[data-mail-tabs]");
-  qEl.value = mailQuery;
+  var qEl     = C.querySelector("[data-mail-q]");
+  var tabsEl  = C.querySelector("[data-mail-tabs]");
+  var rangeEl = C.querySelector("[data-mail-ranges]");
+  var rawEl   = C.querySelector("[data-mail-raw]");
+  var noteEl  = C.querySelector("[data-mail-note]");
+  var bodyEl  = C.querySelector("[data-mail-body]");
+  var pagerEl = C.querySelector("[data-mail-pager]");
+  qEl.value = mailSearch;
 
-  /* 활성 탭은 따로 기억하지 않고 입력창 값에서 되짚는다.
-     대표가 검색어를 직접 고치면 어느 탭도 활성이 아니게 된다 —
-     지금 보고 있는 것이 무엇인지 화면이 거짓말하지 않아야 한다. */
-  var mailTab = null;
-  function syncTab(){
-    var v = (qEl.value||"").trim();
-    if (!v){ v = mailTabQuery("전체"); qEl.value = v; }   /* 빈 입력은 전체로 되돌린다 — 결과와 입력창이 어긋나지 않게 */
-    mailTab = null;
-    MAIL_TABS.forEach(function(t){ if (t.q === v) mailTab = t.key; });
-  }
-  function drawTabs(){
+  var reqSeq = 0;   /* 늦게 도착한 응답이 새 결과를 덮지 않게 */
+
+  function drawChips(){
     tabsEl.innerHTML = MAIL_TABS.map(function(t){
       return "<button class='proj-chip"+(t.key===mailTab?" on":"")+"' data-mail-tab='"+esc(t.key)+"'>"+esc(t.key)+"</button>";
     }).join("");
     tabsEl.querySelectorAll("[data-mail-tab]").forEach(function(b){
+      /* 조건이 바뀌면 페이지도 "아는 것"도 전부 초기화한다.
+         앞 조건에서 3쪽까지 봤다는 사실은 새 조건과 아무 관계가 없다 —
+         남겨 두면 있지도 않은 페이지 번호를 그리게 된다. */
+      b.onclick = function(){ mailTab = b.getAttribute("data-mail-tab"); mailPage = 1; mailMaxPage = 1; refresh(); };
+    });
+    rangeEl.innerHTML = MAIL_RANGES.map(function(r){
+      return "<button class='proj-chip"+(r.key===mailRange?" on":"")+"' data-mail-range='"+esc(r.key)+"'>"+esc(r.label)+"</button>";
+    }).join("");
+    rangeEl.querySelectorAll("[data-mail-range]").forEach(function(b){
+      /* 기간을 바꾸면 1페이지로 — 3페이지에서 범위만 바뀌면 무엇을 보는지 알 수 없다 */
+      b.onclick = function(){ mailRange = b.getAttribute("data-mail-range"); mailPage = 1; mailMaxPage = 1; refresh(); };
+    });
+    rawEl.textContent = mailBuildQuery(mailTab, mailRange, mailSearch);
+  }
+
+  function drawPager(){
+    var h = mailPagerHTML();
+    pagerEl.style.display = h ? "" : "none";
+    pagerEl.innerHTML = h;
+    pagerEl.querySelectorAll("[data-mail-pg]").forEach(function(b){
       b.onclick = function(){
-        qEl.value = mailTabQuery(b.getAttribute("data-mail-tab"));   /* 입력창도 같이 갱신 */
-        refresh();
+        var n = parseInt(b.getAttribute("data-mail-pg"), 10);
+        if (!n || n < 1 || n === mailPage) return;
+        mailPage = n; load();
       };
     });
   }
 
-  function paint(inner, list){
-    var b = C.querySelector("[data-mail-body]"); if (!b) return;
-    b.innerHTML = inner;
+  function paintRows(list){
+    bodyEl.innerHTML = mailRowsHTML(list);
     (list||[]).forEach(function(m, i){
-      bindMailComposer(b, m, i);
-      var tr = b.querySelector("[data-mail-row='"+i+"']");
-      var detail = b.querySelector("[data-mail-detail='"+i+"']");
-      if (!tr || !detail) return;
-      if (mailOpenId === String(m.id||"")) detail.style.display = "";
-      tr.onclick = function(){
-        var open = detail.style.display === "none";
-        b.querySelectorAll("[data-mail-detail]").forEach(function(d){ d.style.display = "none"; });
-        detail.style.display = open ? "" : "none";
-        mailOpenId = open ? String(m.id||"") : null;
-      };
+      var tr = bodyEl.querySelector("[data-mail-row='"+i+"']");
+      if (tr) tr.onclick = function(){ mailOpenModal(m, i); };
     });
   }
+
   function load(){
-    mailQuery = (qEl.value||"").trim();   /* syncTab 이 이미 빈 값을 채워 둔다 */
-    var want = mailQuery;
-    paint("<div class='empty'>메일을 불러오는 중…</div>");
-    mailFetch(want).then(function(j){
-      if (curRoute() !== "mail" || want !== mailQuery) return;   /* 화면을 떠났거나 검색어가 바뀌었으면 폐기 */
-      if (!j || j.error) { paint("<div class='empty'>메일을 불러오지 못했습니다. "+esc(mailErrText(j && j.error))+"</div>"); return; }
+    var q = mailBuildQuery(mailTab, mailRange, mailSearch);
+    var seq = ++reqSeq;
+    var start = (mailPage - 1) * MAIL_PAGE_SIZE;
+    /* 페이지를 옮기는 중에는 목록을 지우지 않는다 — 화면이 비면 답답하다. 흐리게만 한다. */
+    var first = !bodyEl.querySelector("[data-mail-row]");
+    if (first) bodyEl.innerHTML = "<div class='empty'>메일을 불러오는 중…</div>";
+    else bodyEl.classList.add("busy");
+    noteEl.textContent = "불러오는 중…";
+    rawEl.textContent = q;
+
+    mailFetch(q, start).then(function(j){
+      if (curRoute() !== "mail" || seq !== reqSeq) return;   /* 화면을 떠났거나 조건이 바뀌었으면 폐기 */
+      bodyEl.classList.remove("busy");
+      if (!j || j.error){
+        noteEl.textContent = "";
+        bodyEl.innerHTML = "<div class='empty'>메일을 불러오지 못했습니다. "+esc(mailErrText(j && j.error))+"</div>";
+        mailPaging = false; drawPager(); return;
+      }
       mailList = j.mails || [];
-      paint(mailRowsHTML(mailList), mailList);
+      /* hasMore 를 주지 않는 옛 응답이면 페이징 자체를 숨긴다 — 있지도 않은 페이지를 그리지 않기 위해 */
+      mailPaging = (typeof j.hasMore === "boolean");
+      mailHasMore = mailPaging && j.hasMore;
+      if (!mailPaging){ mailPage = 1; mailMaxPage = 1; }
+      else mailMaxPage = Math.max(mailMaxPage, mailPage + (mailHasMore ? 1 : 0));
+      paintRows(mailList);
+      drawPager();
+      var rangeLabel = "";
+      MAIL_RANGES.forEach(function(r){ if (r.key === mailRange) rangeLabel = r.label; });
+      noteEl.textContent = mailTab + " · " + rangeLabel +
+        (mailSearch.trim() ? " · 검색 “" + mailSearch.trim() + "”" : "") +
+        " · " + mailList.length + "건" + (mailPaging ? " (" + mailPage + "쪽)" : "");
     }).catch(function(err){
-      if (curRoute() !== "mail" || want !== mailQuery) return;
-      paint("<div class='empty'>메일을 불러오지 못했습니다. "+esc(mailErrText(err && err.message || err))+"</div>");
+      if (curRoute() !== "mail" || seq !== reqSeq) return;
+      bodyEl.classList.remove("busy");
+      noteEl.textContent = "";
+      bodyEl.innerHTML = "<div class='empty'>메일을 불러오지 못했습니다. "+esc(mailErrText(err && err.message || err))+"</div>";
     });
   }
-  function refresh(){ syncTab(); drawTabs(); load(); }
-  C.querySelector("[data-mail-load]").onclick = refresh;
-  qEl.onkeydown = function(e){ if (e.key === "Enter"){ e.preventDefault(); refresh(); } };
+  function refresh(){ drawChips(); load(); }
+
+  function applySearch(){
+    var v = (qEl.value||"");
+    if (v === mailSearch) { refresh(); return; }
+    mailSearch = v;
+    mailPage = 1; mailMaxPage = 1;    /* 검색어가 바뀌면 1페이지부터 */
+    refresh();
+  }
+  C.querySelector("[data-mail-go]").onclick = applySearch;
+  C.querySelector("[data-mail-reload]").onclick = function(){ refresh(); };
+  C.querySelector("[data-mail-clear]").onclick = function(){
+    qEl.value = ""; mailSearch = ""; mailPage = 1; mailMaxPage = 1; refresh();
+  };
+  qEl.onkeydown = function(e){ if (e.key === "Enter"){ e.preventDefault(); applySearch(); } };
+  qEl.onsearch = applySearch;   /* type=search 의 × 로 지웠을 때도 반영 */
+
+  mailPage = 1; mailMaxPage = 1;
   refresh();
 }
 
