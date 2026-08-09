@@ -2490,11 +2490,14 @@ function mountDashHomepage(box){
       "<a class='btn sm ghost' style='text-decoration:none' href='#homepage'>자세히 →</a></div></div>"+
       "<div class='dhp-body'>"+
       "<div class='dhp-nums'>"+
-      "<div class='dhp-num'><div class='k'>오늘 방문</div><div class='v tnum'>"+comma(today)+"</div></div>"+
-      "<div class='dhp-num'><div class='k'>최근 7일 방문</div><div class='v tnum'>"+comma(week)+"</div></div>"+
+      "<div class='dhp-num'><div class='k'>오늘 방문자</div><div class='v tnum'>"+comma(today)+"</div></div>"+
+      "<div class='dhp-num'><div class='k'>최근 7일 방문자</div><div class='v tnum'>"+comma(week)+"</div></div>"+
       "<div class='dhp-num'><div class='k'>방문→리드 전환율</div><div class='v tnum'>"+rate.toFixed(1)+"<small>%</small></div></div>"+
       "</div>"+
-      "<div class='dhp-src'><div class='eyebrow' style='margin-bottom:8px'>유입 경로 상위</div>"+
+      /* 위 숫자는 방문자, 아래 막대는 페이지뷰라 단위가 다르다 — 안 적으면 "숫자가 깨졌나"로 읽힌다.
+         어휘는 홈페이지 메뉴(hpCardsHTML·hpTrafficHTML)와 맞춘다. */
+      "<div class='dhp-src'><div class='eyebrow' style='margin-bottom:8px'>유입 경로 상위"+
+      "<span class='sec-note' style='margin-left:8px;font-size:11px;font-weight:400;letter-spacing:0'>페이지뷰 기준</span></div>"+
       (src.length ? hpBarListHTML(src, function(x){ return x.name; })
                   : "<div class='sec-note'>아직 유입 경로 데이터가 없습니다.</div>")+   /* .empty 는 40px 여백 박스 — 요약 패널엔 과하다 */
       "</div></div>";
