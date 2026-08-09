@@ -77,6 +77,18 @@
   }
   .muted { color: var(--dim); font-size: 13px; }
   .error { color: var(--danger); font-size: 13px; }
+  /* 이메일 링크 로그인 (비밀번호 없음) */
+  .divider {
+    display: flex; align-items: center; gap: 10px; color: var(--dim);
+    font-size: 12px; margin: 18px 0 14px;
+  }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .email-row { display: flex; flex-direction: column; gap: 8px; }
+  .email-row input {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px; font-size: 14px; width: 100%;
+  }
+  .email-row input:focus { outline: none; border-color: var(--accent); }
   .notice {
     background: var(--panel); border: 1px solid var(--warn); color: var(--warn);
     border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-top: 12px;
@@ -99,8 +111,19 @@
   <!-- 로그인 -->
   <div id="view-login" class="center-card hidden">
     <h2>애플시드 관리 포털</h2>
-    <p>구글 계정으로 로그인하십시오.</p>
-    <button class="btn btn-accent" id="btn-login">Google로 로그인</button>
+    <div id="login-main">
+      <p>구글 계정으로 로그인하십시오.</p>
+      <button class="btn btn-accent" id="btn-login">Google로 로그인</button>
+      <div class="divider">또는</div>
+      <div class="email-row">
+        <input type="email" id="email-input" placeholder="이메일 주소" autocomplete="email" inputmode="email">
+        <button class="btn" id="btn-email-link">메일로 로그인 링크 받기</button>
+      </div>
+    </div>
+    <div id="email-sent" class="hidden">
+      <p>메일함을 확인하세요 — 로그인 링크를 보냈습니다.<br><span class="muted" id="email-sent-to"></span></p>
+      <button class="btn" id="btn-email-resend">다시 보내기</button>
+    </div>
     <p id="login-error" class="error" style="margin-top:12px"></p>
   </div>
 
@@ -225,6 +248,49 @@ function esc(s) {
 }
 function logout() { auth.signOut(); }
 
+// ── 이메일 링크 로그인 (비밀번호 없음) — onAuthStateChanged 등록 전에 처리 ──
+var emailLinkPending = false;
+if (auth.isSignInWithEmailLink(location.href)) {
+  emailLinkPending = true;
+  var savedEmail = localStorage.getItem('emailForSignIn') ||
+    prompt('로그인에 사용한 이메일을 입력하세요') || '';
+  auth.signInWithEmailLink(savedEmail, location.href).then(function () {
+    localStorage.removeItem('emailForSignIn');
+    history.replaceState(null, '', location.pathname); // URL의 로그인 링크 파라미터 제거
+    emailLinkPending = false;
+  }).catch(function (err) {
+    emailLinkPending = false;
+    show('view-login');
+    document.getElementById('login-error').textContent = '이메일 링크 로그인 실패: ' + (err.message || err);
+  });
+}
+
+var lastLinkEmail = '';
+function sendLoginLink(email) {
+  email = String(email || '').trim();
+  var errBox = document.getElementById('login-error');
+  errBox.textContent = '';
+  if (!email) { document.getElementById('email-input').focus(); return; }
+  auth.sendSignInLinkToEmail(email, {
+    url: location.origin + location.pathname,
+    handleCodeInApp: true
+  }).then(function () {
+    lastLinkEmail = email;
+    localStorage.setItem('emailForSignIn', email);
+    document.getElementById('email-sent-to').textContent = email;
+    document.getElementById('login-main').classList.add('hidden');
+    document.getElementById('email-sent').classList.remove('hidden');
+  }).catch(function (err) {
+    errBox.textContent = '링크 발송 실패: ' + (err.message || err);
+  });
+}
+document.getElementById('btn-email-link').addEventListener('click', function () {
+  sendLoginLink(document.getElementById('email-input').value);
+});
+document.getElementById('btn-email-resend').addEventListener('click', function () {
+  sendLoginLink(lastLinkEmail);
+});
+
 // ── 로그인 ───────────────────────────────────────────────────
 document.getElementById('btn-login').addEventListener('click', function () {
   document.getElementById('login-error').textContent = '';
@@ -234,7 +300,10 @@ document.getElementById('btn-login').addEventListener('click', function () {
 });
 
 auth.onAuthStateChanged(function (user) {
-  if (!user) { show('view-login'); return; }
+  if (!user) {
+    if (emailLinkPending) { show('loading'); return; } // 링크 로그인 진행 중 — 로그인 카드 깜빡임 방지
+    show('view-login'); return;
+  }
   me.user = user;
   show('loading');
   resolveAccess(user);

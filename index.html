@@ -853,6 +853,15 @@
   #authGate p{margin:0 0 20px; color:var(--ink-2); font-size:14px; line-height:1.6;}
   #authGate .ag-err{color:var(--urgent); font-size:13px; margin:12px 0 0;}
   #authGate .ag-actions{display:flex; gap:8px; justify-content:center; flex-wrap:wrap;}
+  /* 이메일 링크 로그인 (비밀번호 없음) */
+  #authGate .ag-divider{display:flex; align-items:center; gap:10px; color:var(--ink-3);
+    font-size:12px; margin:18px 0 14px;}
+  #authGate .ag-divider::before, #authGate .ag-divider::after{content:""; flex:1; height:1px; background:var(--line);}
+  #authGate .ag-email{display:flex; flex-direction:column; gap:8px;}
+  #authGate .ag-email.hidden, #authGate #agLoginMain.hidden{display:none;}
+  #authGate .ag-email input{border:1px solid var(--line-strong); background:var(--surface-2);
+    color:var(--ink); border-radius:8px; padding:8px 12px; font-size:14px; width:100%;}
+  #authGate .ag-email input:focus{outline:none; border-color:var(--accent);}
 </style>
 <!-- Firebase compat CDN — 구글 로그인 게이트 (admin.html과 동일 버전, Spark 무료 플랜 범위) -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
@@ -865,8 +874,19 @@
   <div class="ag-card" id="agLoading"><h2>애플시드 관리 시스템</h2><p>확인 중…</p></div>
   <div class="ag-card hidden" id="agLogin">
     <h2>애플시드 관리 시스템</h2>
-    <p>구글 계정으로 로그인하십시오.</p>
-    <button class="btn primary" id="agLoginBtn">Google로 로그인</button>
+    <div id="agLoginMain">
+      <p>구글 계정으로 로그인하십시오.</p>
+      <button class="btn primary" id="agLoginBtn">Google로 로그인</button>
+      <div class="ag-divider">또는</div>
+      <div class="ag-email">
+        <input type="email" id="agEmailInput" placeholder="이메일 주소" autocomplete="email" inputmode="email">
+        <button class="btn" id="agEmailBtn">메일로 로그인 링크 받기</button>
+      </div>
+    </div>
+    <div class="ag-email hidden" id="agEmailSent">
+      <p style="margin:0 0 4px">메일함을 확인하세요 — 로그인 링크를 보냈습니다.<br><span id="agEmailSentTo" style="color:var(--ink-3)"></span></p>
+      <button class="btn" id="agEmailResend">다시 보내기</button>
+    </div>
     <p class="ag-err" id="agLoginErr"></p>
   </div>
   <div class="ag-card hidden" id="agPending">
@@ -5170,6 +5190,47 @@ var fbAuth = firebase.auth();
 var fbDb = firebase.firestore();
 var AUTH = { user: null, grade: 0, isAdmin: false };
 
+/* ── 이메일 링크 로그인 (비밀번호 없음) — onAuthStateChanged 등록 전에 처리 ── */
+var emailLinkPending = false;
+if (fbAuth.isSignInWithEmailLink(location.href)) {
+  emailLinkPending = true;
+  var savedEmail = localStorage.getItem("emailForSignIn") ||
+    prompt("로그인에 사용한 이메일을 입력하세요") || "";
+  fbAuth.signInWithEmailLink(savedEmail, location.href).then(function(){
+    localStorage.removeItem("emailForSignIn");
+    history.replaceState(null, "", location.pathname);  /* URL의 로그인 링크 파라미터 제거 */
+    emailLinkPending = false;
+  }).catch(function(err){
+    emailLinkPending = false;
+    agShow("agLogin");
+    document.getElementById("agLoginErr").textContent = "이메일 링크 로그인 실패: " + (err && err.message || err);
+  });
+}
+
+var lastLinkEmail = "";
+function agSendLink(email){
+  email = String(email || "").trim();
+  var errBox = document.getElementById("agLoginErr");
+  errBox.textContent = "";
+  if (!email){ document.getElementById("agEmailInput").focus(); return; }
+  fbAuth.sendSignInLinkToEmail(email, {
+    url: location.origin + location.pathname,
+    handleCodeInApp: true
+  }).then(function(){
+    lastLinkEmail = email;
+    localStorage.setItem("emailForSignIn", email);
+    document.getElementById("agEmailSentTo").textContent = email;
+    document.getElementById("agLoginMain").classList.add("hidden");
+    document.getElementById("agEmailSent").classList.remove("hidden");
+  }).catch(function(err){
+    errBox.textContent = "링크 발송 실패: " + (err && err.message || err);
+  });
+}
+document.getElementById("agEmailBtn").onclick = function(){
+  agSendLink(document.getElementById("agEmailInput").value);
+};
+document.getElementById("agEmailResend").onclick = function(){ agSendLink(lastLinkEmail); };
+
 function agShow(id){
   document.getElementById("authGate").classList.remove("hidden");
   ["agLoading","agLogin","agPending","agDenied","agMaster"].forEach(function(v){
@@ -5216,6 +5277,7 @@ document.getElementById("agMasterBtn").onclick = function(){
 
 fbAuth.onAuthStateChanged(function(user){
   if (!user){
+    if (emailLinkPending){ agShow("agLoading"); return; }  /* 링크 로그인 진행 중 — 로그인 카드 깜빡임 방지 */
     AUTH.user = null; AUTH.grade = 0; AUTH.isAdmin = false;
     clearKey();   /* 로그아웃 시 localStorage의 접속 키 제거 */
     state.data = null; state.loading = true; state.error = null; state.keyError = null;
