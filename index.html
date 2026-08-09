@@ -5162,7 +5162,8 @@ var FIREBASE_CONFIG = {
   authDomain: 'appleseed-admin.firebaseapp.com',
   projectId: 'appleseed-admin'
 };
-var ADMIN_EMAIL = 'kjyart@gmail.com';   /* 화면 분기용 — 실제 강제는 Firestore 규칙 */
+/* 예비 어드민 dir2k@naver.com — 주 계정 사용 불가 대비 (실제 강제는 Firestore 규칙, 화면 분기용) */
+var ADMIN_EMAILS = ['kjyart@gmail.com', 'dir2k@naver.com'];
 
 firebase.initializeApp(FIREBASE_CONFIG);
 var fbAuth = firebase.auth();
@@ -5222,7 +5223,7 @@ fbAuth.onAuthStateChanged(function(user){
     return;
   }
   AUTH.user = user;
-  AUTH.isAdmin = String(user.email || "").toLowerCase() === ADMIN_EMAIL;
+  AUTH.isAdmin = ADMIN_EMAILS.indexOf(String(user.email || "").toLowerCase()) !== -1;
   agShow("agLoading");
   resolveAccess(user);
 });

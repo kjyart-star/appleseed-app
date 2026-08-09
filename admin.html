@@ -201,7 +201,8 @@ var FIREBASE_CONFIG = {
   projectId: 'appleseed-admin'
 };
 var RECEIVER_URL = 'https://script.google.com/macros/s/AKfycbww9cob2CYg8PVnQO35WesnTaZRIPVmYg-ClLQbyWN7q-b2skKmXZG1XAjLbQhntnYA/exec';
-var ADMIN_EMAIL = 'kjyart@gmail.com'; // 표시용 — 실제 권한은 수신부와 Firestore 규칙이 강제
+// 예비 어드민 dir2k@naver.com — 주 계정 사용 불가 대비. 표시용 — 실제 권한은 수신부와 Firestore 규칙이 강제
+var ADMIN_EMAILS = ['kjyart@gmail.com', 'dir2k@naver.com'];
 
 var GRADE_NAMES = { 1: '1등급 · 대표', 2: '2등급 · 임원', 3: '3등급 · 사원', 4: '4등급 · 기타' };
 
@@ -242,7 +243,7 @@ auth.onAuthStateChanged(function (user) {
 // ── 접근 판정: 내 users 문서 확인 → 없으면 '대기'로 자동 생성 ─────
 function resolveAccess(user) {
   var email = String(user.email || '').toLowerCase();
-  if (email === ADMIN_EMAIL) { enter(1); return; } // 어드민은 문서 없이도 통과 (수신부도 동일 판정)
+  if (ADMIN_EMAILS.indexOf(email) !== -1) { enter(1); return; } // 어드민은 문서 없이도 통과 (수신부도 동일 판정)
 
   var ref = db.collection('users').doc(user.uid);
   ref.get().then(function (snap) {
