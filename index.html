@@ -5433,24 +5433,26 @@ function mailRowsHTML(list){
 
    1) sandbox="" 인 iframe 안에서만 렌더한다. 빈 문자열이면 스크립트·폼·팝업·상위 접근이 전부 막힌다.
       allow-scripts 는 넣지 않는다 — 넣는 순간 <script> 와 onerror 가 살아난다.
-   2) 문서 안에 CSP 를 한 겹 더 건다. img-src 를 data: 로만 열어 원격 이미지·추적 픽셀을 막는다.
-      대표가 메일을 열었다는 사실이 발신자에게 새어 나가면 안 된다.
+   2) 문서 안에 CSP 를 한 겹 더 건다.
+
+      ⚠️ 이미지는 허용하고 스크립트는 막는다. 둘은 성격이 다르다 (2026-08-09 대표 지시로 정정):
+        - 스크립트 = 대시보드를 조작할 수 있는 **공격 통로**. 무조건 막는다.
+        - 이미지   = 열람 사실이 발신자에게 알려지는 **프라이버시 문제**. 추적 픽셀은
+                     광고·뉴스레터에 몰려 있는데 그건 이미 분류 필터로 걸러냈다. 남는 것은
+                     청구서·깃허브·고객 메일이라 막아서 얻는 것보다 못 보는 손해가 크다.
+      "이미지를 풀었으니 스크립트도 풀어도 되겠지"는 틀렸다. img-src 외에는 열지 말 것.
+
    3) srcdoc 은 속성 문자열이 아니라 프로퍼티로 대입한다 — 따옴표·& 이스케이프 실수가 원천적으로 없다. */
 function mailFrameDoc(html){
   return "<!doctype html><html><head><meta charset='utf-8'>"+
-    "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:;\">"+
+    "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src https: data:;\">"+
     "<style>html,body{margin:0;padding:12px 14px;background:#fff;color:#141414;"+
       "font:14px/1.7 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;"+
       "word-break:break-word;overflow-wrap:anywhere;}"+
       "img{max-width:100%;height:auto;} table{max-width:100%;} a{color:#0b57d0;}</style>"+
     "</head><body>"+html+"</body></html>";
 }
-/* 원격 자원을 실제로 참조할 때만 안내한다. 조용히 막으면 왜 이미지가 안 보이는지 모른다. */
-function mailHasRemote(html){
-  var s = String(html||"");
-  return /(?:src|background)\s*=\s*["']?\s*(?:https?:)?\/\//i.test(s) ||
-         /url\(\s*["']?\s*(?:https?:)?\/\//i.test(s);
-}
+/* mailHasRemote() 는 이미지 차단 안내를 띄우던 함수. 이미지를 허용하면서 쓸 곳이 없어져 제거했다. */
 /* sandbox 안에서는 높이를 알려줄 수 없다(스크립트가 막혀 있으므로).
    글자 수로 어림잡고, 넘치면 iframe 안에서 스크롤하게 둔다. */
 function mailFrameHeight(src){
@@ -5476,12 +5478,9 @@ function mailMessageNode(msg){
     f.style.height = mailFrameHeight(html) + "px";
     f.srcdoc = mailFrameDoc(html);
     slot.appendChild(f);
-    if (mailHasRemote(html)){
-      slot.appendChild(el("<div class='mail-warn'>원격 이미지는 차단했습니다 — 메일을 열었다는 사실이 발신자에게 전달되지 않습니다.</div>"));
-    }
+    /* 차단 안내는 뺐다 — 이미지를 허용했으므로 이제 사실이 아니다. 화면이 거짓말하면 안 된다. */
   } else {
-    /* 평문. 링크 자동변환은 하지 않는다 — linkify 는 유튜브 썸네일을 원격으로 불러와서
-       위 차단 원칙을 깬다. 그대로 보여주는 쪽이 정직하다. */
+    /* 평문. 링크 자동변환은 하지 않는다 — 요청에 없던 기능이고, 평문은 그대로 보여주는 쪽이 정직하다. */
     slot.appendChild(el("<div style=\"padding:12px 14px; white-space:pre-wrap; font-size:13.5px; line-height:1.75\">"+
       esc(String(msg.text||"") || "(본문이 없습니다)")+"</div>"));
   }
