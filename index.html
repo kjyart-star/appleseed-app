@@ -5182,7 +5182,55 @@ function hpLoad(){
    회신은 미리보기를 거쳐야만 보낼 수 있다. 우리는 디자인 회사고, 나가는 메일은 제품이다.
    미리보기 HTML 은 화면이 흉내내지 않고 수신부가 발송용 템플릿 그대로 돌려준다 —
    대표가 승인한 것과 실제로 나가는 것이 달라지면 안 된다. */
-var mailQuery = "in:inbox";
+/* ── 분류 쿼리 (대표 지시 2026-08-09 — 받은편지함 전부가 아니라 의뢰·결제·업무만 본다)
+   수신부는 ?q= 로 받은 지메일 검색어를 그대로 GmailApp.search 에 넘긴다.
+   그래서 분류는 전부 여기 문자열로 끝난다 — 서버를 고칠 이유가 없다.
+   아래 발신자 목록은 2026-08-09 시점 대표 받은편지함 실측으로 만든 것이다.
+   광고가 새로 늘면 이 상수에 추가한다.
+
+   도메인이 아니라 서브도메인 단위로 막는 곳이 있다(news.comfy.org, research.anthropic.com).
+   같은 회사라도 invoice+statements@comfy.org / invoice+statements@mail.anthropic.com 은
+   결제 메일이라 살려야 하기 때문이다. 도메인 전체를 막으면 청구서를 놓친다. */
+var MAIL_Q_JUNK =
+  "-category:promotions -category:social -subject:광고 " +
+  "-from:(substack.com OR mobbin.com OR news.comfy.org OR send.vidiq.com OR news.synology.com " +
+  "OR aimlapi.com OR viewtrap.com OR aliexpress.com OR kr.email.samsung.com " +
+  "OR ollama.com OR kimpga.com OR research.anthropic.com)";
+
+/* 의뢰 — 홈페이지 문의 폼·리드 메일. 제목 태그로 확실히 잡힌다.
+   포함 조건(MATCH)과 제외 조건을 나눠 둔 것은 업무 탭이 MATCH 만 빼야 하기 때문이다(아래). */
+var MAIL_Q_REQUEST_MATCH = "(subject:\"[문의]\" OR subject:\"[리드]\" OR subject:\"[APPLΞSEED]\")";
+var MAIL_Q_REQUEST = MAIL_Q_REQUEST_MATCH + " -from:notifications@github.com";
+
+/* 결제 — 청구서·영수증·정기결제. 전부 포함 조건이라 그대로 부정할 수 있다. */
+var MAIL_Q_PAYMENT =
+  "(subject:(청구서 OR 영수증 OR 결제 OR 입금 OR 세금계산서 OR invoice OR receipt " +
+  "OR payment OR billing OR credit) " +
+  "OR from:(billing OR invoice OR payments OR googleplay-noreply@google.com))";
+
+/* 탭. 문자열을 손으로 쓰지 않고 위 상수를 조합한다 — 상수를 고치면 탭이 따라온다.
+
+   업무는 "포함 키워드"가 아니라 "제외" 방식이다. 키워드로 포함시키면 처음 보는 발신자의
+   진짜 업무 메일(직접 온 고객 문의, 협력사 연락)을 놓친다. 놓치는 쪽이 훨씬 위험하므로,
+   광고·뉴스레터로 확인된 발신자만 빼고 나머지는 남긴다.
+
+   업무에서 의뢰를 뺄 때는 MATCH 만 뺀다. -(A -B) 같은 중첩 부정은 지메일 해석이 불확실하고,
+   github 알림은 애초에 의뢰가 아니라 업무로 남는 것이 맞다.
+
+   탭 사이 중복은 허용한다(결제 메일이 전체에도 나온다). 중복을 없애려고 쿼리를 더
+   복잡하게 만들면 유지보수가 안 된다. */
+var MAIL_TABS = [
+  { key:"전체", q:"in:inbox " + MAIL_Q_JUNK },
+  { key:"의뢰", q:"in:inbox " + MAIL_Q_REQUEST },
+  { key:"결제", q:"in:inbox " + MAIL_Q_PAYMENT },
+  { key:"업무", q:"in:inbox " + MAIL_Q_JUNK + " -" + MAIL_Q_REQUEST_MATCH + " -" + MAIL_Q_PAYMENT }
+];
+function mailTabQuery(key){
+  for (var i=0; i<MAIL_TABS.length; i++) if (MAIL_TABS[i].key === key) return MAIL_TABS[i].q;
+  return null;
+}
+
+var mailQuery = mailTabQuery("전체");
 var mailList = [];
 var mailDrafts = {};      /* threadId → 작성 중 본문. 발송 실패해도 날아가지 않게 보관 */
 var mailPreviewed = {};   /* threadId → 미리보기를 통과한 본문. 이것과 같아야만 보낼 수 있다 */
@@ -5350,6 +5398,7 @@ function renderMail(){
     C.innerHTML = html;
     return;
   }
+  html += "<div class='proj-chips' style='margin-bottom:10px' data-mail-tabs></div>";
   html += "<div class='ct-controls'>"+
     "<input class='proj-search' type='text' placeholder='지메일 검색어 (예: in:inbox is:unread)' data-mail-q>"+
     "<button class='btn primary' data-mail-load>불러오기</button></div>";
@@ -5357,7 +5406,30 @@ function renderMail(){
   C.innerHTML = html;
 
   var qEl = C.querySelector("[data-mail-q]");
+  var tabsEl = C.querySelector("[data-mail-tabs]");
   qEl.value = mailQuery;
+
+  /* 활성 탭은 따로 기억하지 않고 입력창 값에서 되짚는다.
+     대표가 검색어를 직접 고치면 어느 탭도 활성이 아니게 된다 —
+     지금 보고 있는 것이 무엇인지 화면이 거짓말하지 않아야 한다. */
+  var mailTab = null;
+  function syncTab(){
+    var v = (qEl.value||"").trim();
+    if (!v){ v = mailTabQuery("전체"); qEl.value = v; }   /* 빈 입력은 전체로 되돌린다 — 결과와 입력창이 어긋나지 않게 */
+    mailTab = null;
+    MAIL_TABS.forEach(function(t){ if (t.q === v) mailTab = t.key; });
+  }
+  function drawTabs(){
+    tabsEl.innerHTML = MAIL_TABS.map(function(t){
+      return "<button class='proj-chip"+(t.key===mailTab?" on":"")+"' data-mail-tab='"+esc(t.key)+"'>"+esc(t.key)+"</button>";
+    }).join("");
+    tabsEl.querySelectorAll("[data-mail-tab]").forEach(function(b){
+      b.onclick = function(){
+        qEl.value = mailTabQuery(b.getAttribute("data-mail-tab"));   /* 입력창도 같이 갱신 */
+        refresh();
+      };
+    });
+  }
 
   function paint(inner, list){
     var b = C.querySelector("[data-mail-body]"); if (!b) return;
@@ -5377,7 +5449,7 @@ function renderMail(){
     });
   }
   function load(){
-    mailQuery = (qEl.value||"").trim() || "in:inbox";
+    mailQuery = (qEl.value||"").trim();   /* syncTab 이 이미 빈 값을 채워 둔다 */
     var want = mailQuery;
     paint("<div class='empty'>메일을 불러오는 중…</div>");
     mailFetch(want).then(function(j){
@@ -5390,9 +5462,10 @@ function renderMail(){
       paint("<div class='empty'>메일을 불러오지 못했습니다. "+esc(mailErrText(err && err.message || err))+"</div>");
     });
   }
-  C.querySelector("[data-mail-load]").onclick = load;
-  qEl.onkeydown = function(e){ if (e.key === "Enter"){ e.preventDefault(); load(); } };
-  load();
+  function refresh(){ syncTab(); drawTabs(); load(); }
+  C.querySelector("[data-mail-load]").onclick = refresh;
+  qEl.onkeydown = function(e){ if (e.key === "Enter"){ e.preventDefault(); refresh(); } };
+  refresh();
 }
 
 var ROUTES = {
