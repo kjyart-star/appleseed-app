@@ -102,6 +102,7 @@
   .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff;}
   .btn.primary:hover{filter:brightness(1.06);}
   .btn.sm{padding:5px 10px; font-size:12px; border-radius:8px;}
+  .btn:disabled{opacity:0.45; cursor:not-allowed; filter:none;}
   .btn.danger:hover{border-color:var(--urgent); color:var(--urgent);}
   .btn.ghost{background:transparent;}
 
@@ -5041,10 +5042,18 @@ function hpLoad(){
   });
 }
 
-/* ============ 메일관리 — 대표 지메일 받은편지함 (읽기 전용) ============
-   수신부 action=mail 이 어드민 이메일 일치만 통과시킨다(등급으로 열지 않음 — 개인 메일함).
-   화면에서도 같은 게이트를 걸어 오해가 없게 한다. 답장·삭제는 지원하지 않는다. */
+/* ============ 메일관리 — 대표 지메일 받은편지함 + 회신 ============
+   수신부 action=mail / mailPreview / mailReply 가 어드민 이메일 일치만 통과시킨다
+   (등급으로 열지 않음 — 개인 메일함). 화면에서도 같은 게이트를 걸어 오해가 없게 한다.
+
+   회신은 미리보기를 거쳐야만 보낼 수 있다. 우리는 디자인 회사고, 나가는 메일은 제품이다.
+   미리보기 HTML 은 화면이 흉내내지 않고 수신부가 발송용 템플릿 그대로 돌려준다 —
+   대표가 승인한 것과 실제로 나가는 것이 달라지면 안 된다. */
 var mailQuery = "in:inbox";
+var mailList = [];
+var mailDrafts = {};      /* threadId → 작성 중 본문. 발송 실패해도 날아가지 않게 보관 */
+var mailPreviewed = {};   /* threadId → 미리보기를 통과한 본문. 이것과 같아야만 보낼 수 있다 */
+var mailOpenId = null;    /* 펼쳐 둔 스레드 */
 
 function mailFetch(q){
   if (!AUTH.user) return Promise.reject(new Error("로그인이 필요합니다."));
@@ -5053,9 +5062,26 @@ function mailFetch(q){
       "&idToken="+encodeURIComponent(token)+"&t="+Date.now(), { cache:"no-store" });
   }).then(function(r){ return r.json(); });
 }
+/* 회신·미리보기는 POST — 본문이 길고, 쿼리에 남기면 안 된다.
+   Content-Type 은 text/plain — Apps Script 웹앱은 CORS 프리플라이트를 처리하지 못한다
+   (기존 apiSend 와 같은 방식). idToken 은 URL 이 아니라 본문에 담는다. */
+function mailPost(payload){
+  if (!AUTH.user) return Promise.reject(new Error("로그인이 필요합니다."));
+  return AUTH.user.getIdToken().then(function(token){
+    return fetch(RECEIVER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(Object.assign({ idToken: token }, payload))
+    });
+  }).then(function(r){ return r.text(); }).then(function(t){
+    var j = null; try{ j = JSON.parse(t); }catch(e){}
+    if (!j) throw new Error("서버 응답을 해석하지 못했습니다.");
+    return j;
+  });
+}
 function mailErrText(code){
   if (code === "forbidden" || code === "unauthorized") return "이 계정에는 메일 열람 권한이 없습니다. 대표 계정으로 로그인하십시오.";
-  return "메일을 불러오지 못했습니다: " + String(code || "알 수 없는 오류");
+  return String(code || "알 수 없는 오류");
 }
 function mailDateText(iso){
   var d = new Date(iso);
@@ -5066,23 +5092,124 @@ function mailDateText(iso){
 }
 function mailSafeLink(u){ return /^https:\/\/mail\.google\.com\//.test(String(u||"")) ? String(u) : ""; }
 
+var MAIL_TEXTAREA_CSS = "width:100%; box-sizing:border-box; min-height:170px; resize:vertical; padding:12px 14px;"+
+  " background:var(--surface-2); border:1px solid var(--line-strong); border-radius:10px; color:var(--ink);"+
+  " font-family:var(--font); font-size:13.5px; line-height:1.75;";
+
+function mailComposerHTML(m, idx){
+  var link = mailSafeLink(m.link);
+  return "<tr data-mail-detail='"+idx+"' style='display:none'><td colspan='3' style='background:var(--surface-2)'>"+
+    "<div style='padding:6px 2px 18px'>"+
+      "<div style='display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px'>"+
+        "<span style='color:var(--ink-3); font-size:12.5px'>회신 — 스레드에 이어 붙습니다.</span>"+
+        (link ? "<a class='btn sm' style='text-decoration:none' href='"+esc(link)+"' target='_blank' rel='noopener'>지메일에서 열기</a>" : "")+
+      "</div>"+
+      "<textarea data-mail-text='"+idx+"' style='"+MAIL_TEXTAREA_CSS+"' placeholder='회신 내용을 입력하십시오. 줄바꿈은 그대로 유지됩니다.'></textarea>"+
+      "<div style='display:flex; gap:8px; flex-wrap:wrap; margin-top:10px'>"+
+        "<button class='btn sm' data-mail-prev='"+idx+"'>미리보기</button>"+
+        "<button class='btn primary' data-mail-send='"+idx+"' disabled>보내기</button>"+
+        "<button class='btn sm' data-mail-cancel='"+idx+"'>취소</button>"+
+      "</div>"+
+      "<div data-mail-status='"+idx+"' style='margin-top:10px; font-size:13px; color:var(--ink-3)'>보내기 전에 미리보기로 확인하십시오.</div>"+
+      "<div data-mail-prevbox='"+idx+"' style='margin-top:12px'></div>"+
+    "</div></td></tr>";
+}
+
 function mailRowsHTML(list){
   if (!list.length) return "<div class='empty'>받은 메일이 없습니다.</div>";
   var h = "<table><thead><tr><th style='width:110px'>날짜</th><th style='width:200px'>발신자</th><th>제목</th></tr></thead><tbody>";
-  list.forEach(function(m){
-    var link = mailSafeLink(m.link);
+  list.forEach(function(m, i){
     var who = String(m.fromName||"").trim() || String(m.from||"");
-    h += "<tr"+(link?" data-mail-open='"+esc(link)+"' style='cursor:pointer'":"")+">"+
+    h += "<tr data-mail-row='"+i+"' style='cursor:pointer'>"+
       "<td class='tnum' style='color:var(--ink-3)'>"+esc(mailDateText(m.date))+"</td>"+
       "<td>"+(m.starred?"★ ":"")+esc(who)+"</td>"+
       "<td><div style='font-weight:"+(m.unread?"700":"400")+"'>"+esc(m.subject||"(제목 없음)")+"</div>"+
       "<div style='color:var(--ink-3); font-size:12.5px; margin-top:3px'>"+esc(m.snippet||"")+"</div></td></tr>";
+    h += mailComposerHTML(m, i);
   });
   return h+"</tbody></table>";
 }
 
+/* 목록 한 건에 대한 회신 UI 배선. root 는 목록을 담은 컨테이너 */
+function bindMailComposer(root, m, idx){
+  var detail = root.querySelector("[data-mail-detail='"+idx+"']");
+  var ta     = root.querySelector("[data-mail-text='"+idx+"']");
+  var prevBt = root.querySelector("[data-mail-prev='"+idx+"']");
+  var sendBt = root.querySelector("[data-mail-send='"+idx+"']");
+  var cancBt = root.querySelector("[data-mail-cancel='"+idx+"']");
+  var stat   = root.querySelector("[data-mail-status='"+idx+"']");
+  var box    = root.querySelector("[data-mail-prevbox='"+idx+"']");
+  var tid    = String(m.id||"");
+  if (!detail || !ta) return;
+
+  ta.value = mailDrafts[tid] || "";
+
+  function say(msg, tone){
+    stat.textContent = msg;
+    stat.style.color = tone==="ok" ? "var(--accent)" : tone==="err" ? "var(--urgent)" : "var(--ink-3)";
+  }
+  /* 본문이 미리보기 때와 다르면 보내기를 막는다 — 확인하지 않은 메일은 나가지 않는다 */
+  function syncSend(){
+    var ok = ta.value.trim() && mailPreviewed[tid] === ta.value;
+    sendBt.disabled = !ok;
+  }
+  ta.oninput = function(){
+    mailDrafts[tid] = ta.value;
+    if (mailPreviewed[tid] !== ta.value){
+      box.innerHTML = "";
+      say("본문이 바뀌었습니다. 다시 미리보기로 확인하십시오.");
+    }
+    syncSend();
+  };
+
+  prevBt.onclick = function(){
+    if (!ta.value.trim()){ say("본문이 비어 있습니다.", "err"); return; }
+    var want = ta.value;
+    prevBt.disabled = true; say("미리보기를 만드는 중…");
+    mailPost({ action:"mailPreview", bodyText: want }).then(function(j){
+      prevBt.disabled = false;
+      if (!j.ok || j.error){ say(mailErrText(j.error), "err"); return; }
+      mailPreviewed[tid] = want;
+      var frame = document.createElement("iframe");
+      frame.setAttribute("sandbox", "");                       /* 미리보기 안에서 스크립트가 돌지 않게 */
+      frame.style.cssText = "width:100%; height:440px; border:1px solid var(--line-strong); border-radius:10px; background:#141414";
+      /* 감싸는 부분은 미리보기용 여백·인코딩 정리일 뿐, 실제로 나가는 본문은 j.html 그대로다 */
+      frame.srcdoc = "<meta charset='utf-8'><body style='margin:0;background:#141414'>" + j.html + "</body>";
+      box.innerHTML = "";
+      box.appendChild(frame);
+      say("실제로 나갈 메일입니다. 확인 후 보내기를 누르십시오.", "ok");
+      syncSend();
+    }).catch(function(err){
+      prevBt.disabled = false;
+      say(mailErrText(err && err.message || err), "err");
+    });
+  };
+
+  sendBt.onclick = function(){
+    var want = ta.value;
+    if (mailPreviewed[tid] !== want){ say("미리보기로 확인한 본문과 다릅니다.", "err"); syncSend(); return; }
+    sendBt.disabled = true; prevBt.disabled = true; ta.disabled = true;
+    say("보내는 중…");
+    mailPost({ action:"mailReply", threadId: tid, bodyText: want }).then(function(j){
+      prevBt.disabled = false; ta.disabled = false;
+      if (!j.ok || j.error){ say(mailErrText(j.error), "err"); syncSend(); return; }   /* 본문은 그대로 둔다 */
+      delete mailDrafts[tid]; delete mailPreviewed[tid];
+      ta.value = ""; box.innerHTML = "";
+      sendBt.disabled = true;
+      say("회신을 보냈습니다.", "ok");
+    }).catch(function(err){
+      prevBt.disabled = false; ta.disabled = false;
+      say(mailErrText(err && err.message || err), "err");                              /* 작성한 본문 유지 */
+      syncSend();
+    });
+  };
+
+  cancBt.onclick = function(){ mailOpenId = null; detail.style.display = "none"; };
+  syncSend();
+}
+
 function renderMail(){
-  var html = pageHead("mail", "지메일 받은편지함을 읽어옵니다. 답장은 지메일에서 하십시오.", "");
+  var html = pageHead("mail", "지메일 받은편지함을 읽어옵니다. 메일을 열면 그 자리에서 회신할 수 있습니다.", "");
   if (!AUTH.isAdmin){
     html += "<section class='panel' style='background:transparent;border:0;box-shadow:none'>"+
       "<div class='placeholder'><div class='ico'>🔒</div><h3>권한 없음</h3>"+
@@ -5099,11 +5226,21 @@ function renderMail(){
   var qEl = C.querySelector("[data-mail-q]");
   qEl.value = mailQuery;
 
-  function paint(inner){
+  function paint(inner, list){
     var b = C.querySelector("[data-mail-body]"); if (!b) return;
     b.innerHTML = inner;
-    b.querySelectorAll("[data-mail-open]").forEach(function(tr){
-      tr.onclick = function(){ window.open(tr.getAttribute("data-mail-open"), "_blank", "noopener"); };
+    (list||[]).forEach(function(m, i){
+      bindMailComposer(b, m, i);
+      var tr = b.querySelector("[data-mail-row='"+i+"']");
+      var detail = b.querySelector("[data-mail-detail='"+i+"']");
+      if (!tr || !detail) return;
+      if (mailOpenId === String(m.id||"")) detail.style.display = "";
+      tr.onclick = function(){
+        var open = detail.style.display === "none";
+        b.querySelectorAll("[data-mail-detail]").forEach(function(d){ d.style.display = "none"; });
+        detail.style.display = open ? "" : "none";
+        mailOpenId = open ? String(m.id||"") : null;
+      };
     });
   }
   function load(){
@@ -5112,11 +5249,12 @@ function renderMail(){
     paint("<div class='empty'>메일을 불러오는 중…</div>");
     mailFetch(want).then(function(j){
       if (curRoute() !== "mail" || want !== mailQuery) return;   /* 화면을 떠났거나 검색어가 바뀌었으면 폐기 */
-      if (!j || j.error) { paint("<div class='empty'>"+esc(mailErrText(j && j.error))+"</div>"); return; }
-      paint(mailRowsHTML(j.mails || []));
+      if (!j || j.error) { paint("<div class='empty'>메일을 불러오지 못했습니다. "+esc(mailErrText(j && j.error))+"</div>"); return; }
+      mailList = j.mails || [];
+      paint(mailRowsHTML(mailList), mailList);
     }).catch(function(err){
       if (curRoute() !== "mail" || want !== mailQuery) return;
-      paint("<div class='empty'>"+esc(mailErrText(err && err.message || err))+"</div>");
+      paint("<div class='empty'>메일을 불러오지 못했습니다. "+esc(mailErrText(err && err.message || err))+"</div>");
     });
   }
   C.querySelector("[data-mail-load]").onclick = load;
