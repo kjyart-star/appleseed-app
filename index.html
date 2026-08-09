@@ -80,6 +80,8 @@
     justify-content:center; gap:5px; white-space:nowrap;}
   .sb-foot button:hover{color:var(--ink); border-color:var(--accent);}
   .sb-foot button.on{background:var(--accent-soft); color:var(--accent-ink); border-color:var(--accent);}
+  .sb-sync{flex:1 1 100%; text-align:center; font-size:10.5px; color:var(--ink-3); min-height:13px; letter-spacing:0.01em;}
+  .sb-sync.warn{color:var(--urgent);}
 
   .main{flex:1; margin-left:var(--sidebar-w); min-width:0; display:flex; flex-direction:column;}
   .topbar{display:none;}
@@ -933,6 +935,7 @@
       <button id="reloadBtn" title="데이터 새로고침">↻ 새로고침</button>
       <button id="portalBtn" title="관리 포털 (승인·홈페이지 통계)">🗂 관리 포털</button>
       <button id="logoutBtn" title="구글 계정 로그아웃 (공용 기기에서 사용 후)">⎋ 로그아웃</button>
+      <div class="sb-sync" id="syncNote"></div>
     </div>
   </aside>
   <div class="backdrop" id="backdrop"></div>
@@ -965,6 +968,80 @@ function setKey(v){
 function clearKey(){
   KEY = "";
   try { localStorage.removeItem(KEY_LS); } catch(e){}
+  clearDataCache();   /* 접속 권한을 잃으면 캐시도 함께 버린다 — 매출·고객 데이터다 */
+}
+
+/* ============ 마지막 데이터 캐시 ============
+   2026-08-09 실측: 페이지 자체는 빠른데(HTML 83KB, load 478ms) Apps Script 웹앱
+   응답이 상시 1.2초대, 최대 4.4초다. 서버를 고칠 수 없으니 기다리는 동안 화면을
+   비워두지 않는다 — 지난번 데이터를 즉시 그리고 뒤에서 갱신한다.
+
+   대신 "낡은 데이터를 최신인 줄 알고 보는 것"이 더 위험하므로, 캐시를 보고 있을 때는
+   사이드바에 마지막 갱신 시각과 갱신 상태를 반드시 표시한다.
+   매출·고객 데이터라 계정별로 나누고(uid), 로그아웃·키 거부 시 전부 지운다. */
+var DATA_CACHE_PREFIX = "asdash:data:";
+var DATA_CACHE_MAX = 2 * 1024 * 1024;   /* 직렬화 2MB 초과면 저장하지 않는다 — 쿼터 예외로 화면이 죽지 않게 */
+
+function dataCacheKey(){
+  var uid = (typeof AUTH !== "undefined" && AUTH.user) ? AUTH.user.uid : "";
+  return uid ? (DATA_CACHE_PREFIX + uid) : "";
+}
+function saveDataCache(data){
+  var k = dataCacheKey();
+  if (!k || !data) return;
+  try{
+    var s = JSON.stringify({ savedAt: Date.now(), data: data });
+    if (s.length > DATA_CACHE_MAX){
+      console.warn("[캐시] 저장 건너뜀 — 직렬화 " + Math.round(s.length/1024) + "KB 로 한도(2MB) 초과");
+      return;
+    }
+    localStorage.setItem(k, s);
+  }catch(e){ console.warn("[캐시] 저장 실패:", (e && e.message) || e); }
+}
+function readDataCache(){
+  var k = dataCacheKey();
+  if (!k) return null;
+  try{
+    var raw = localStorage.getItem(k);
+    if (!raw) return null;
+    var o = JSON.parse(raw);
+    return (o && o.data) ? o : null;
+  }catch(e){ return null; }
+}
+/* AUTH.user 가 이미 비워진 뒤에 불릴 수 있고(로그아웃 순서), 공용 기기에서는
+   다른 계정 캐시도 남기지 않는 편이 안전하므로 접두어로 전부 지운다 */
+function clearDataCache(){
+  try{
+    var kill = [];
+    for (var i=0; i<localStorage.length; i++){
+      var k = localStorage.key(i);
+      if (k && k.indexOf(DATA_CACHE_PREFIX) === 0) kill.push(k);
+    }
+    kill.forEach(function(k){ localStorage.removeItem(k); });
+  }catch(e){}
+}
+
+/* 사이드바 갱신 상태 한 줄 — 지금 보고 있는 게 언제 것인지 숨기지 않는다 */
+function syncTimeText(ms){
+  if (!ms) return "";
+  var d = new Date(ms);
+  return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+}
+function updateSyncNote(){
+  var el = document.getElementById("syncNote");
+  if (!el) return;
+  var t = syncTimeText(state.cachedAt);
+  if (!state.cachedAt && !state.refreshing){ el.textContent = ""; el.className = "sb-sync"; return; }
+  if (state.refreshFailed){
+    el.textContent = "갱신 실패 — 아래는 " + t + " 기준";
+    el.className = "sb-sync warn";
+  } else if (state.refreshing){
+    el.textContent = t ? ("갱신 중… (표시는 " + t + " 기준)") : "불러오는 중…";
+    el.className = "sb-sync";
+  } else {
+    el.textContent = "마지막 갱신 " + t;
+    el.className = "sb-sync";
+  }
 }
 /* 서버가 키를 거부했을 때: 키를 버리고 입력 화면으로 되돌린 뒤, 재시도하지 말라고 표시한 오류를 만든다 */
 function keyRejected(msg){
@@ -980,7 +1057,8 @@ function keyRejected(msg){
 }
 
 /* ============ 상태 ============ */
-var state = { data:null, mask: localStorage.getItem("appleseed_mask")==="1", loading:true, error:null, keyError:null };
+var state = { data:null, mask: localStorage.getItem("appleseed_mask")==="1", loading:true, error:null, keyError:null,
+  cachedAt:0, fromCache:false, refreshing:false, refreshFailed:false };
 
 /* ============ 유틸 ============ */
 function esc(s){ s = (s==null?"":String(s));
@@ -1207,6 +1285,11 @@ async function loadData(){
   if (state.data && !Array.isArray(state.data.atts)) state.data.atts = [];
   state.loading = false;
   state.error = null;
+  /* 다음 방문에 즉시 그릴 수 있게 저장 — 성공 경로에서만 */
+  state.cachedAt = Date.now();
+  state.fromCache = false;
+  state.refreshFailed = false;
+  saveDataCache(state.data);
 }
 async function apiSend(method, table, id, body){
   if (window.__MOCK__){ alert("목 모드: 저장은 실서버에서만 동작합니다."); return null; }
@@ -3158,19 +3241,20 @@ function mountProjectWorkspace(container){
         else if (t==="subs") location.hash="#subs";
         else if (t==="impending" && impending.length){ projSelId = impending[0].id; localStorage.setItem("appleseed_proj_sel", projSelId); drawList(); drawDetail(); } };
     });
-    /* 마감 임박 공모전(7일 이내, 국내+해외) — 동일 fetch 캐시 재사용, 실패 시 줄 생략 */
-    Promise.all([
-      fetchContests("domestic", false).catch(function(){ return null; }),
-      fetchContests("overseas", false).catch(function(){ return null; })
-    ]).then(function(res){
-      if (!res[0] && !res[1]) return;                 /* 둘 다 실패 → 줄 생략 */
+    /* 마감 임박 공모전(7일 이내, 국내+해외) — 이미 받아 둔 세션 캐시만 쓴다.
+       여기서 받아버리면 대시보드 첫 화면이 외부 JSON 2건을 기다리게 된다.
+       공모전 메뉴를 한 번 열면 캐시가 차고, 그다음부터 이 줄이 나타난다.
+       캐시가 없거나 앞서 실패했으면 줄을 생략한다(기존 실패 동작과 동일). */
+    (function(){
+      var ctD = cachedContests("domestic"), ctO = cachedContests("overseas");
+      if (!ctD && !ctO) return;
       var wrap = needEl.querySelector(".proj-need");
       if (!wrap || wrap.querySelector("[data-need-go='contests']")) return;
-      var cnt = countImpendingContests(res[0]) + countImpendingContests(res[1]);
+      var cnt = countImpendingContests(ctD) + countImpendingContests(ctO);
       var row = el(needRow("contests","🏆","마감 임박 공모전", cnt, ""));
       wrap.appendChild(row);
       row.onclick = function(){ location.hash = "#contests"; };
-    });
+    })();
     var mine = (d.actions||[]).filter(function(a){ return !a.done; })
       .sort(function(a,b){ return String(a.due||"9999").localeCompare(String(b.due||"9999")); }).slice(0,8);
     var mt = "";
@@ -3697,12 +3781,15 @@ var CONTEST_URLS = {
   overseas: "https://junyeo217.github.io/ai-contest-board/data/overseas-contests.json"
 };
 var CONTEST_BOARD = "https://junyeo217.github.io/ai-contest-board/";
-var CONTEST_TTL = 10*60*1000; /* 10분 모듈 캐시 (두 파일 각각) */
+/* 세션 캐시 (두 파일 각각). 공모전 데이터는 자주 바뀌지 않으므로 한 번 받으면
+   세션 동안 재요청하지 않는다 — 갱신이 필요하면 화면의 [↻ 갱신] 이 force 로 부른다.
+   첫 로드 때는 아예 받지 않는다: 공모전 메뉴를 열 때가 첫 요청 시점이다. */
 var contestCache = {};        /* { domestic:{t,data}, overseas:{t,data} } */
 var contestTab = "domestic", contestCat = "전체", contestSearch = "";
+function cachedContests(kind){ var c = contestCache[kind]; return c ? c.data : null; }
 function fetchContests(kind, force){
   var c = contestCache[kind];
-  if (!force && c && (Date.now()-c.t) < CONTEST_TTL) return Promise.resolve(c.data);
+  if (!force && c) return Promise.resolve(c.data);
   return fetch(CONTEST_URLS[kind], { cache:"no-store" }).then(function(r){
     if (!r.ok) throw new Error("HTTP "+r.status);
     return r.json();
@@ -5314,6 +5401,7 @@ function renderKeyGate(){
 function render(){
   var route = curRoute();
   buildNav();
+  updateSyncNote();
   C.classList.toggle("crm-wide", route==="projects");
   var tb = document.querySelector(".tb-title"); if(tb) tb.textContent = TITLES[route]||"애플시드";
   if (!KEY && !window.__MOCK__){ renderKeyGate(); return; }
@@ -5351,12 +5439,18 @@ document.getElementById("maskBtn").onclick = function(){
 };
 document.getElementById("reloadBtn").onclick = async function(){
   this.textContent = "↻ …";
-  try{ state.error=null; await loadData(); }catch(e){ state.error=e.message; }
+  state.refreshing = true; updateSyncNote();
+  try{ state.error=null; await loadData(); }
+  catch(e){
+    if (state.fromCache || state.data) state.refreshFailed = true;   /* 보고 있던 데이터는 유지 */
+    else state.error = e.message;
+  }
+  state.refreshing = false;
   render(); this.textContent = "↻ 새로고침";
 };
 document.getElementById("portalBtn").onclick = function(){ location.href = "admin.html"; };
 document.getElementById("logoutBtn").onclick = async function(){
-  var ok = await confirmDlg("구글 계정에서 로그아웃합니다. 이 브라우저에 저장된 접속 키도 함께 삭제됩니다.", "로그아웃", "로그아웃");
+  var ok = await confirmDlg("구글 계정에서 로그아웃합니다. 이 브라우저에 저장된 접속 키와 데이터 캐시도 함께 삭제됩니다.", "로그아웃", "로그아웃");
   if (!ok) return;
   fbAuth.signOut();   /* onAuthStateChanged(null)에서 clearKey·상태 초기화·게이트 표시 */
 };
@@ -5378,14 +5472,34 @@ function startDashboard(){
     /* 데이터 자동 동기화: 1분마다 서버 기준으로 갱신 (탭이 보이고 로그인돼 있을 때만) —
        다른 기기·Claude가 바꾼 내용이 화면에 오래 남아있지 않게 함 */
     setInterval(function(){
-      if (!document.hidden && KEY) loadData().then(render).catch(function(){});
+      if (!document.hidden && KEY){
+        state.refreshing = true; updateSyncNote();
+        loadData().then(function(){ state.refreshing=false; render(); })
+                  .catch(function(){ state.refreshing=false; state.refreshFailed=true; updateSyncNote(); });
+      }
     }, 60000);
   }
   buildNav();
+  /* 캐시가 있으면 먼저 그린다 — GAS 응답을 기다리는 1~4초 동안 빈 화면을 보여주지 않는다.
+     캐시는 어디까지나 지난번 것이므로 갱신 상태를 사이드바에 계속 띄운다. */
+  var cached = readDataCache();
+  if (cached){
+    state.data = cached.data;
+    if (state.data && !Array.isArray(state.data.atts)) state.data.atts = [];
+    state.cachedAt = cached.savedAt;
+    state.fromCache = true;
+    state.loading = false;
+    state.refreshing = true;
+  }
   render();
   (async function(){
     try{ await loadData(); }
-    catch(e){ state.loading=false; state.error=e.message; }
+    catch(e){
+      /* 갱신 실패 — 캐시는 지우지 않는다. 대신 언제 것인지 명시한다 */
+      if (state.fromCache){ state.refreshFailed = true; state.loading = false; }
+      else { state.loading=false; state.error=e.message; }
+    }
+    state.refreshing = false;
     render();
   })();
 }
@@ -5500,8 +5614,10 @@ fbAuth.onAuthStateChanged(function(user){
   if (!user){
     if (emailLinkPending){ agShow("agLoading"); return; }  /* 링크 로그인 진행 중 — 로그인 카드 깜빡임 방지 */
     AUTH.user = null; AUTH.grade = 0; AUTH.isAdmin = false;
-    clearKey();   /* 로그아웃 시 localStorage의 접속 키 제거 */
+    clearKey();   /* 로그아웃 시 localStorage의 접속 키·데이터 캐시 제거 */
     state.data = null; state.loading = true; state.error = null; state.keyError = null;
+    state.cachedAt = 0; state.fromCache = false; state.refreshing = false; state.refreshFailed = false;
+    updateSyncNote();
     agShow("agLogin");
     return;
   }
