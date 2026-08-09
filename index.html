@@ -803,6 +803,11 @@
 .kpis.hp5{grid-template-columns:repeat(5,1fr);}
   @media (max-width:1100px){ .kpis.hp5{grid-template-columns:repeat(2,1fr);} }
   @media (max-width:460px){ .kpis.hp5{grid-template-columns:1fr;} }
+  /* 대시보드 유입 요약: 숫자 3칸 (막대는 hp-bars 재사용, 2단 배치는 hp-traffic-grid 재사용) */
+  .dhp-nums{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+  .dhp-num .k{font-size:12.5px; color:var(--ink-2); font-weight:600;}
+  .dhp-num .v{font-size:clamp(19px,2.4vw,24px); font-weight:800; letter-spacing:-.02em; line-height:1.15; margin-top:6px;}
+  .dhp-num .v small{font-size:13px; font-weight:700; color:var(--ink-2); margin-left:1px;}
 
   /* ===== AI 공모전 ===== */
   .ct-tabs{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;}
@@ -2411,6 +2416,10 @@ function renderDashboard(){
     "<div class='kpi k-ar'><div class='label'>미수금 합계</div><div class='big tnum'>"+moneyMan(arTotal)+"</div><div class='meta'>입금대기 전체</div></div>"+
     "</div>";
 
+  // 홈페이지 유입 — 돈(매출·미수금) 다음에 그 돈이 어디서 올지가 오는 게 읽는 순서로 자연스럽다.
+  // 별개 웹앱에서 비동기로 오므로 자리만 잡아두고(숨김) 데이터가 오면 채운다.
+  html += "<section class='panel' data-dashhp style='display:none'></section>";
+
   // AI 전환
   html += "<section class='panel ai-strip'><div class='ais-row'><div class='ais-lead'><div class='eyebrow'>AI 전환</div><div class='ais-title'>AI 사업 비중</div></div>"+
     "<div class='ais-pct tnum'>"+aiPct.toFixed(1)+"<small>%</small></div>"+
@@ -2457,6 +2466,38 @@ function renderDashboard(){
   bindFold(C);
   startClock();       // 시계 1초 갱신 시작(중복 인터벌은 내부에서 clear)
   mountWeather();     // 날씨 표시(30분 캐시, 실패 시 조용히 숨김)
+  mountDashHomepage(C.querySelector("[data-dashhp]"));   // 유입 요약(비동기, 실패 시 조용히 숨김)
+}
+
+/* 대시보드 유입 요약 — 홈페이지 메뉴와 같은 hpStatsCache 를 쓴다(오가도 요청 1회).
+   본문 렌더를 막지 않고, 수신부 미연결·실패면 패널을 통째로 숨긴 채 둔다
+   (메인에 큰 에러 박스는 과하다 — 안내는 홈페이지 메뉴의 hpWaitingHTML 이 한다). */
+function mountDashHomepage(box){
+  if (!box) return;
+  hpFetchStats(7).then(function(s){
+    if (!s || s === "unauthorized") return;              /* 미연결·오류 → 숨김 유지 */
+    if (!C.contains(box)) return;                        /* 그 사이 화면이 바뀌었으면 폐기 */
+    var days = s.days || [];
+    var today = days.length ? (Number(days[days.length-1].visitors)||0) : 0;
+    var week = 0; days.forEach(function(d){ week += Number(d.visitors)||0; });
+    var rate = Number(s.conversionRate)||0;              /* 수신부가 % 값을 반환 (2.5 = 2.5%) */
+    var src = (s.sources||[]).slice(0,5);                /* 메인은 요약 — 상위 5개만 */
+    box.innerHTML =
+      "<div class='sec-head'><div><div class='eyebrow'>홈페이지</div><h3>유입 요약</h3></div>"+
+      "<div style='display:flex;align-items:center;gap:10px'><span class='sec-note'>최근 7일 · apple-seed.co.kr</span>"+
+      "<a class='btn sm ghost' style='text-decoration:none' href='#homepage'>자세히 →</a></div></div>"+
+      "<div class='hp-traffic-grid'>"+
+      "<div class='dhp-nums'>"+
+      "<div class='dhp-num'><div class='k'>오늘 방문</div><div class='v tnum'>"+comma(today)+"</div></div>"+
+      "<div class='dhp-num'><div class='k'>최근 7일 방문</div><div class='v tnum'>"+comma(week)+"</div></div>"+
+      "<div class='dhp-num'><div class='k'>방문→리드 전환율</div><div class='v tnum'>"+rate.toFixed(1)+"<small>%</small></div></div>"+
+      "</div>"+
+      "<div><div class='eyebrow' style='margin-bottom:8px'>유입 경로 상위</div>"+
+      (src.length ? hpBarListHTML(src, function(x){ return x.name; })
+                  : "<div class='empty'>아직 유입 경로 데이터가 없습니다.</div>")+
+      "</div></div>";
+    box.style.display = "";
+  });
 }
 
 function schedListHtml(limit){
