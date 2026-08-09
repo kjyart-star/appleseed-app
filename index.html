@@ -803,11 +803,13 @@
 .kpis.hp5{grid-template-columns:repeat(5,1fr);}
   @media (max-width:1100px){ .kpis.hp5{grid-template-columns:repeat(2,1fr);} }
   @media (max-width:460px){ .kpis.hp5{grid-template-columns:1fr;} }
-  /* 대시보드 유입 요약: 숫자 3칸 (막대는 hp-bars 재사용, 2단 배치는 hp-traffic-grid 재사용) */
+  /* 대시보드 유입 요약: 숫자 3칸 가로 한 줄 → 그 아래 막대 전폭 (막대는 hp-bars 재사용) */
+  .dhp-body{padding:16px 22px 20px;}
   .dhp-nums{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
   .dhp-num .k{font-size:12.5px; color:var(--ink-2); font-weight:600;}
   .dhp-num .v{font-size:clamp(19px,2.4vw,24px); font-weight:800; letter-spacing:-.02em; line-height:1.15; margin-top:6px;}
   .dhp-num .v small{font-size:13px; font-weight:700; color:var(--ink-2); margin-left:1px;}
+  .dhp-src{margin-top:16px; padding-top:14px; border-top:1px solid var(--line);}
 
   /* ===== AI 공모전 ===== */
   .ct-tabs{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;}
@@ -2486,15 +2488,15 @@ function mountDashHomepage(box){
       "<div class='sec-head'><div><div class='eyebrow'>홈페이지</div><h3>유입 요약</h3></div>"+
       "<div style='display:flex;align-items:center;gap:10px'><span class='sec-note'>최근 7일 · apple-seed.co.kr</span>"+
       "<a class='btn sm ghost' style='text-decoration:none' href='#homepage'>자세히 →</a></div></div>"+
-      "<div class='hp-traffic-grid'>"+
+      "<div class='dhp-body'>"+
       "<div class='dhp-nums'>"+
       "<div class='dhp-num'><div class='k'>오늘 방문</div><div class='v tnum'>"+comma(today)+"</div></div>"+
       "<div class='dhp-num'><div class='k'>최근 7일 방문</div><div class='v tnum'>"+comma(week)+"</div></div>"+
       "<div class='dhp-num'><div class='k'>방문→리드 전환율</div><div class='v tnum'>"+rate.toFixed(1)+"<small>%</small></div></div>"+
       "</div>"+
-      "<div><div class='eyebrow' style='margin-bottom:8px'>유입 경로 상위</div>"+
+      "<div class='dhp-src'><div class='eyebrow' style='margin-bottom:8px'>유입 경로 상위</div>"+
       (src.length ? hpBarListHTML(src, function(x){ return x.name; })
-                  : "<div class='empty'>아직 유입 경로 데이터가 없습니다.</div>")+
+                  : "<div class='sec-note'>아직 유입 경로 데이터가 없습니다.</div>")+   /* .empty 는 40px 여백 박스 — 요약 패널엔 과하다 */
       "</div></div>";
     box.style.display = "";
   });
