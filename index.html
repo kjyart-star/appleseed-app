@@ -5347,12 +5347,21 @@ var mailHasMore = false;
 var mailMaxPage = 1;      /* 존재가 확인된 가장 큰 페이지 번호 */
 var mailPaging  = false;  /* 수신부가 hasMore 를 주는가. 옛 응답이면 false → 페이징을 숨긴다 */
 
-function mailFetch(q, start){
+/* 요청 일련번호와 진행 중인 요청은 renderMail 바깥(모듈 수준)에 둔다.
+   renderMail 안의 지역변수로 두면 화면을 다시 그릴 때 0으로 되돌아가서,
+   앞 화면이 띄워 둔 응답이 늦게 도착했을 때 "최신"으로 오인된다.
+   그 응답은 떨어져 나간 DOM 에 그려지므로 눈에는 안 보이지만
+   mailPaging·mailPage·mailMaxPage 같은 모듈 상태를 조용히 덮어써서
+   다음 그리기부터 페이저가 틀어진다. */
+var mailReqSeq = 0;
+var mailAbort  = null;
+
+function mailFetch(q, start, signal){
   if (!AUTH.user) return Promise.reject(new Error("로그인이 필요합니다."));
   return AUTH.user.getIdToken().then(function(token){
     return fetch(RECEIVER_URL+"?action=mail&q="+encodeURIComponent(q)+
       "&limit="+MAIL_PAGE_SIZE+"&start="+(start||0)+
-      "&idToken="+encodeURIComponent(token)+"&t="+Date.now(), { cache:"no-store" });
+      "&idToken="+encodeURIComponent(token)+"&t="+Date.now(), { cache:"no-store", signal: signal });
   }).then(function(r){ return r.json(); });
 }
 /* 스레드 전문. 목록은 snippet 만 주므로 모달을 열 때 따로 받아온다. */
@@ -5696,7 +5705,10 @@ function renderMail(){
   var pagerEl = C.querySelector("[data-mail-pager]");
   qEl.value = mailSearch;
 
-  var reqSeq = 0;   /* 늦게 도착한 응답이 새 결과를 덮지 않게 */
+  /* 검색은 [검색] 버튼·Enter·×(clear) 에서만 나간다. 입력 이벤트에는 붙이지 않는다 —
+     한 글자마다 요청하면 스무 글자에 스무 번이고, 수신부는 Apps Script 무료 할당량이다.
+     디바운스로 줄이는 방법도 있지만, 대표가 다 치고 나서 누르는 편이 요청 수도 적고
+     "지금 무엇을 검색한 것인지"도 분명하다. */
 
   function drawChips(){
     tabsEl.innerHTML = MAIL_TABS.map(function(t){
@@ -5741,7 +5753,13 @@ function renderMail(){
 
   function load(){
     var q = mailBuildQuery(mailTab, mailRange, mailSearch);
-    var seq = ++reqSeq;
+    var seq = ++mailReqSeq;
+    /* 동시 요청은 1건만 둔다 — 새 조건이 오면 앞 요청을 끊는다.
+       (수신부의 실행까지 취소되지는 않는다. 브라우저 연결과 응답 처리를 정리하는 것이 목적이고,
+        늦은 응답을 버리는 판정은 아래 seq 비교가 한다.) */
+    if (mailAbort) mailAbort.abort();
+    var ac = new AbortController();
+    mailAbort = ac;
     var start = (mailPage - 1) * MAIL_PAGE_SIZE;
     /* 페이지를 옮기는 중에는 목록을 지우지 않는다 — 화면이 비면 답답하다. 흐리게만 한다. */
     var first = !bodyEl.querySelector("[data-mail-row]");
@@ -5750,8 +5768,9 @@ function renderMail(){
     noteEl.textContent = "불러오는 중…";
     rawEl.textContent = q;
 
-    mailFetch(q, start).then(function(j){
-      if (curRoute() !== "mail" || seq !== reqSeq) return;   /* 화면을 떠났거나 조건이 바뀌었으면 폐기 */
+    mailFetch(q, start, ac.signal).then(function(j){
+      if (curRoute() !== "mail" || seq !== mailReqSeq) return;   /* 화면을 떠났거나 조건이 바뀌었으면 폐기 */
+      mailAbort = null;
       bodyEl.classList.remove("busy");
       if (!j || j.error){
         noteEl.textContent = "";
@@ -5772,7 +5791,8 @@ function renderMail(){
         (mailSearch.trim() ? " · 검색 “" + mailSearch.trim() + "”" : "") +
         " · " + mailList.length + "건" + (mailPaging ? " (" + mailPage + "쪽)" : "");
     }).catch(function(err){
-      if (curRoute() !== "mail" || seq !== reqSeq) return;
+      if (curRoute() !== "mail" || seq !== mailReqSeq) return;   /* 끊긴 앞 요청(AbortError)도 여기서 걸러진다 */
+      mailAbort = null;
       bodyEl.classList.remove("busy");
       noteEl.textContent = "";
       bodyEl.innerHTML = "<div class='empty'>메일을 불러오지 못했습니다. "+esc(mailErrText(err && err.message || err))+"</div>";
