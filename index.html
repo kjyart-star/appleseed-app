@@ -5261,11 +5261,11 @@ function renderHomepage(){
 
 function hpLoad(){
   var want = hpPeriod;
-  Promise.all([ hpFetchStats(365), want===365 ? Promise.resolve(null) : hpFetchStats(want), hpFetchLeads() ]).then(function(res){
+  Promise.all([ hpFetchStats(365), want===365 ? Promise.resolve(null) : hpFetchStats(want) ]).then(function(res){
     if (curRoute() !== "homepage") return;                      /* 화면을 떠났으면 그리지 않음 */
     var body = C.querySelector("[data-hp-body]"); if (!body) return;
-    if (res[0]==="unauthorized" || res[1]==="unauthorized" || res[2]==="unauthorized") return;  /* 키 게이트가 이미 떴음 */
-    var base = res[0], leads = res[2];
+    if (res[0]==="unauthorized" || res[1]==="unauthorized") return;  /* 키 게이트가 이미 떴음 */
+    var base = res[0];
     if (!base){ body.innerHTML = hpWaitingHTML(); return; }
     body.innerHTML =
       "<div class='kpis hp5'>"+hpCardsHTML(base)+"</div>"+
@@ -5273,8 +5273,16 @@ function hpLoad(){
       "<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'><span class='sec-note' data-hp-sum></span>"+hpChipsHTML()+"</div></div>"+
       "<div class='chart-body'><div class='chart-scroll' data-hp-chart></div></div></section>"+
       hpTrafficHTML(base)+
-      "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>리드</div><h3>최근 리드 (견적·문의)</h3></div><div class='sec-note'>최근 20건</div></div>"+
-      "<div class='tbl-scroll'>"+(leads ? hpLeadsHTML(leads) : "<div class='empty'>리드 데이터를 아직 받지 못했습니다. 수신부 연결 후 표시됩니다.</div>")+"</div></section>";
+      /* 리드 상세 표는 의뢰관리로 옮겼다 (대표 지시 2026-08-11).
+         같은 데이터가 두 곳에 있으면 어디서 처리했는지 알 수 없다 — 메일에 대해
+         어제 이미 같은 판단을 했다(의뢰는 의뢰관리 한 곳에만). 이 화면의 역할은
+         유입 분석이므로 리드는 위 KPI 의 건수·전환율까지만 남기고 상세는 넘긴다.
+         여기서 hpFetchLeads 도 부르지 않는다 — 안 그리는 데이터를 받을 이유가 없다. */
+      "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>리드</div><h3>누가 문의했나</h3></div>"+
+      "<a class='btn sm ghost' style='text-decoration:none' href='#inquiries'>의뢰관리에서 보기 →</a></div>"+
+      "<div style='padding:10px 22px 20px;font-size:13px;color:var(--ink-3)'>"+
+      "회사·담당자·예산·상태 같은 의뢰 상세는 <b>의뢰관리 › 리드 상세</b>에서 봅니다. "+
+      "이 화면은 유입 분석이라 리드는 위 건수·전환율까지만 둡니다.</div></section>";
     hpPaintChart(want===365 ? base : res[1]);
     body.querySelectorAll("[data-hp-period]").forEach(function(b){
       b.onclick = function(){
@@ -5371,7 +5379,7 @@ var MAIL_VIEWS = {
   inquiries: {
     tabs: INQUIRY_TABS,
     desc: "홈페이지 문의·견적 폼으로 들어온 <b>의뢰</b>만 모았습니다. " +
-          "기간·검색으로 좁혀 보고, 메일을 누르면 전문이 열리며 그 자리에서 회신할 수 있습니다."
+          "<b>메일</b> 탭은 받은 메일 전문과 회신, <b>리드 상세</b> 탭은 폼이 남긴 회사·담당자·예산·상태입니다."
   }
 };
 
@@ -5381,6 +5389,19 @@ var mailUI = {
   mail:      { tab:"전체", range:"7d", search:"", page:1, maxPage:1, hasMore:false, paging:false, list:[] },
   inquiries: { tab:"의뢰", range:"7d", search:"", page:1, maxPage:1, hasMore:false, paging:false, list:[] }
 };
+
+/* ── 의뢰관리의 두 얼굴 (대표 지시 2026-08-11)
+
+   같은 의뢰가 두 곳에 흩어져 있었다. 들어온 "메일"은 의뢰관리에, 폼이 남긴
+   "구조화된 정보"(회사·담당자·예산·희망일정·상태)는 리드 시트에 있었고 그것은
+   홈페이지 메뉴 표에 묻혀 있었다. 의뢰를 실제로 관리하려면 한 화면에 있어야 한다.
+
+   짝짓기는 하지 않는다 — 메일과 리드를 제목 문자열로 이으려면 반드시 깨진다.
+   두 탭을 나란히 두는 것으로 충분하고, 그 이상은 수신부에 공통 키가 생긴 뒤의 일이다.
+   기본은 메일이다(어제까지의 화면 그대로). 선택은 세션 동안 유지한다 — 리드를 보다가
+   다른 메뉴에 다녀왔는데 메일로 되돌아가 있으면 매번 다시 눌러야 한다. */
+var INQUIRY_PANES = [ { key:"mail", label:"메일" }, { key:"leads", label:"리드 상세" } ];
+var inquiryPane = "mail";
 
 function mailTabQuery(tabs, key){
   for (var i=0; i<tabs.length; i++) if (tabs[i].key === key) return tabs[i].q;
@@ -5854,6 +5875,13 @@ function renderMailView(view){
     C.innerHTML = html;
     return;
   }
+  /* 의뢰관리의 탭 줄. 새 컴포넌트를 만들지 않고 분류 칩(.proj-chips/.proj-chip)을 그대로 쓴다.
+     두 화면(pane)을 한 번에 그려 두고 보이기만 바꾼다 — 탭을 누를 때마다 다시 그리면
+     메일 목록을 매번 새로 받게 되고, 그건 어제 잡은 성능 회귀를 그대로 되돌리는 짓이다. */
+  if (isInquiry){
+    html += "<div class='proj-chips' data-inq-tabs style='margin-bottom:16px'></div>";
+  }
+  html += "<div data-inq-pane='mail'>";
   /* 화면에는 사람이 읽는 컨트롤만 둔다(대표 지시 2026-08-09).
      지메일 쿼리 원문은 "고급"에 접어 두되 없애지는 않는다 —
      무엇을 보고 있는지 확인하고 싶을 때 확인할 수 있어야 한다. */
@@ -5880,6 +5908,17 @@ function renderMailView(view){
       "<div class='tbl-scroll mail-body' data-mail-body><div class='empty'>메일을 불러오는 중…</div></div>"+
       "<div class='mail-pager' data-mail-pager style='display:none'></div>"+
     "</section>";
+  html += "</div>";
+  /* 리드 상세 — 홈페이지 메뉴에 있던 그 표 그대로다(hpFetchLeads + hpLeadsHTML).
+     새 수신 함수도 새 표 렌더러도 만들지 않는다. 같은 데이터를 두 가지 모양으로
+     그리기 시작하면 어느 쪽이 맞는지 아무도 모르게 된다. */
+  if (isInquiry){
+    html += "<div data-inq-pane='leads' style='display:none'>"+
+      "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>리드</div>"+
+      "<h3>폼으로 들어온 의뢰 정보</h3></div><div class='sec-note'>최근 20건 · 견적·문의 폼</div></div>"+
+      "<div class='tbl-scroll' data-inq-leads><div class='empty'>리드를 불러오는 중…</div></div>"+
+      "</section></div>";
+  }
   C.innerHTML = html;
 
   var qEl     = C.querySelector("[data-mail-q]");
@@ -6005,6 +6044,49 @@ function renderMailView(view){
   };
   qEl.onkeydown = function(e){ if (e.key === "Enter"){ e.preventDefault(); applySearch(); } };
   qEl.onsearch = applySearch;   /* type=search 의 × 로 지웠을 때도 반영 */
+
+  if (isInquiry) wireInquiryPanes();
+
+  /* 탭 전환은 보이기만 바꾼다. 리드는 처음 열 때 한 번만 받고, 그 뒤로는
+     hpFetchLeads 의 캐시(HP_TTL)가 받는다 — 오가는 동안 요청이 나가지 않는다.
+     실패해도 "받아 봤다"로 표시해 둔다. 안 그러면 수신부가 죽어 있을 때
+     탭을 누를 때마다 요청이 나간다. 다시 시도하려면 화면을 다시 열면 된다. */
+  function wireInquiryPanes(){
+    var tabsRow  = C.querySelector("[data-inq-tabs]");
+    var paneMail = C.querySelector("[data-inq-pane='mail']");
+    var paneLead = C.querySelector("[data-inq-pane='leads']");
+    var leadBox  = C.querySelector("[data-inq-leads]");
+    var leadsTried = false;
+
+    function loadLeads(){
+      leadsTried = true;
+      hpFetchLeads().then(function(rows){
+        if (curRoute() !== view || !leadBox.isConnected) return;   /* 화면을 떠났으면 그리지 않음 */
+        if (rows === "unauthorized") return;                       /* 키 게이트가 이미 떴음 */
+        /* 리드를 못 받아도 메일 탭은 멀쩡하다 — 안내는 이 탭 안에만 그린다 */
+        leadBox.innerHTML = rows
+          ? hpLeadsHTML(rows)
+          : "<div class='empty'>리드 데이터를 받지 못했습니다. 수신부 연결 후 표시됩니다. (메일 탭은 그대로 쓸 수 있습니다)</div>";
+        applyMask();
+      });
+    }
+    function showPane(k){
+      inquiryPane = k;
+      paneMail.style.display = (k === "mail")  ? "" : "none";
+      paneLead.style.display = (k === "leads") ? "" : "none";
+      tabsRow.querySelectorAll("[data-inq-pane-btn]").forEach(function(b){
+        b.classList.toggle("on", b.getAttribute("data-inq-pane-btn") === k);
+      });
+      if (k === "leads" && !leadsTried) loadLeads();
+    }
+    tabsRow.innerHTML = INQUIRY_PANES.map(function(p){
+      return "<button class='proj-chip' data-inq-pane-btn='"+p.key+"'>"+esc(p.label)+"</button>";
+    }).join("");
+    tabsRow.querySelectorAll("[data-inq-pane-btn]").forEach(function(b){
+      b.onclick = function(){ showPane(b.getAttribute("data-inq-pane-btn")); };
+    });
+    showPane(inquiryPane);
+  }
 
   s.page = 1; s.maxPage = 1;
   refresh();
