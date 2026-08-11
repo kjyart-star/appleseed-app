@@ -72,6 +72,9 @@
   .nav-item.active{background:var(--accent-soft); color:var(--accent-ink);}
   .nav-item .soon{margin-left:auto; font-size:9.5px; font-weight:700; color:var(--ink-3);
     background:var(--surface-3); border:1px solid var(--line); padding:1px 6px; border-radius:999px;}
+  /* 안 읽은 의뢰 개수. '준비중' 칩과 자리·모양은 같고 색만 다르다 — 이건 알림이라 눈에 띄어야 한다.
+     새 색을 만들지 않고 기존 강조색 변수를 그대로 쓴다(라이트·다크 모두 자동으로 맞는다). */
+  .nav-item .soon.badge{color:var(--accent-ink); background:var(--accent-soft); border-color:var(--accent);}
   .sb-foot{flex:none; border-top:1px solid var(--line); padding:10px 12px;
     display:flex; flex-wrap:wrap; gap:7px;}
   .sb-foot button{flex:1 1 auto; min-width:0; border:1px solid var(--line-strong);
@@ -1149,7 +1152,7 @@ var state = { data:null, mask: localStorage.getItem("appleseed_mask")==="1", loa
    mail=수신부 지메일, homepage=수신부 방문집계, contests=공모전 보드, gov=K-Startup.
    (넷 다 state.data 를 한 글자도 읽지 않는다 — 확인함) 시트가 갱신됐다고 이 화면을
    다시 그리면 얻는 것은 없고 남의 API 요청과 깜박임만 늘어난다. */
-var SELF_FETCH_ROUTES = { mail:1, homepage:1, contests:1, gov:1 };
+var SELF_FETCH_ROUTES = { mail:1, inquiries:1, homepage:1, contests:1, gov:1 };
 
 /* 데이터 지문. 문자열을 통째로 들고 있지 않으려고 djb2 해시 + 길이로 줄인다.
    해시가 충돌하면 그 회차 갱신 한 번을 건너뛰지만, 다음 변경에서 곧바로 달라진다.
@@ -1566,7 +1569,9 @@ document.addEventListener("mousemove", function(e){
 var MENU = [
   { cap:"현황", items:[ ["dashboard","📊","대시보드",0] ] },
   { cap:"업무", items:[ ["todos","✅","할일관리",0], ["calendar","📅","일정관리",0], ["meetings","🎙️","전사록",0], ["memos","📝","메모관리",0], ["mail","✉️","메일관리",0] ] },
-  { cap:"영업", items:[ ["clients","🤝","고객관리",0], ["projects","🎬","프로젝트관리",0], ["homepage","🌐","홈페이지",0] ] },
+  /* 의뢰관리가 고객관리 앞에 있는 이유: 의뢰 → 고객 → 프로젝트 순으로 파이프라인이 흐른다.
+     메뉴 순서가 일하는 순서와 같아야 어디를 봐야 할지 생각하지 않게 된다. */
+  { cap:"영업", items:[ ["inquiries","📨","의뢰관리",0], ["clients","🤝","고객관리",0], ["projects","🎬","프로젝트관리",0], ["homepage","🌐","홈페이지",0] ] },
   { cap:"재무", items:[ ["revenue","💰","매출관리",0], ["deposits","🏦","입금관리",0], ["expenses","🧾","지출관리",0], ["profit","📈","영업이익분석",0], ["subs","🔁","AI 구독관리",0],
       ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",1] ] },
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
@@ -1586,6 +1591,12 @@ function buildNav(){
     g.items.forEach(function(it){
       var active = it[0]===cur ? " active" : "";
       var soon = it[3] ? "<span class='soon'>준비중</span>" : "";
+      /* 의뢰관리에는 안 읽은 의뢰 개수를 같은 자리에 띄운다. 0이면 아무것도 넣지 않는다.
+         render() 가 nav 를 다시 만들 때 배지가 사라지지 않게 여기서도 그린다. */
+      if (!it[3] && it[0] === "inquiries"){
+        var bt = mailBadgeText();
+        if (bt) soon = "<span class='soon badge' data-mail-badge>"+esc(bt)+"</span>";
+      }
       html += "<a class='nav-item"+active+"' href='#"+it[0]+"'><span class='ic'>"+it[1]+"</span>"+esc(it[2])+soon+"</a>";
     });
   });
@@ -5326,16 +5337,54 @@ var MAIL_Q_PAYMENT =
    github 알림은 애초에 의뢰가 아니라 업무로 남는 것이 맞다.
 
    탭 사이 중복은 허용한다(결제 메일이 전체에도 나온다). 중복을 없애려고 쿼리를 더
-   복잡하게 만들면 유지보수가 안 된다. */
+   복잡하게 만들면 유지보수가 안 된다.
+
+   ── 의뢰는 여기서 빠졌다 (대표 지시 2026-08-09
+      "메일관리에서 홈페이지를 통해서 의뢰 온것들만 따로 메뉴만들어줘 따로 관리할수있게")
+
+   의뢰는 돈이 되는 유일한 메일이다. 청구서·깃허브 알림과 같은 목록에 섞여 있으면 놓친다.
+   그래서 왼쪽 메뉴에 [의뢰관리]로 따로 뺐고 여기에는 남기지 않는다.
+   전체 탭에서도 뺀다 — 양쪽에 다 나오면 어디서 처리했는지 알 수 없게 되기 때문이다.
+   결과적으로 메일관리는 전체(=결제+업무)·결제·업무 세 탭이다. */
 var MAIL_TABS = [
-  { key:"전체", q:"in:inbox " + MAIL_Q_JUNK },
-  { key:"의뢰", q:"in:inbox " + MAIL_Q_REQUEST },
+  { key:"전체", q:"in:inbox " + MAIL_Q_JUNK + " -" + MAIL_Q_REQUEST_MATCH },
   { key:"결제", q:"in:inbox " + MAIL_Q_PAYMENT },
   { key:"업무", q:"in:inbox " + MAIL_Q_JUNK + " -" + MAIL_Q_REQUEST_MATCH + " -" + MAIL_Q_PAYMENT }
 ];
-function mailTabQuery(key){
-  for (var i=0; i<MAIL_TABS.length; i++) if (MAIL_TABS[i].key === key) return MAIL_TABS[i].q;
-  return MAIL_TABS[0].q;
+
+/* 의뢰관리 화면의 분류. 한 종류뿐이라 분류 칩 줄은 화면에서 숨는다(renderMailView).
+   조건은 새로 쓰지 않고 MAIL_Q_REQUEST 를 그대로 쓴다 — 같은 뜻을 두 곳에 적으면
+   반드시 한쪽만 고쳐져서 목록과 배지가 어긋난다. */
+var INQUIRY_TABS = [
+  { key:"의뢰", q:"in:inbox " + MAIL_Q_REQUEST }
+];
+
+/* 메일 계열 화면은 둘이고 렌더 코드는 한 벌을 공유한다(renderMailView).
+   복사해 두면 다음에 한쪽만 고쳐져서 두 화면이 조용히 어긋난다.
+   화면마다 다른 것은 ① 분류 탭 목록 ② 설명문 뿐이다. */
+var MAIL_VIEWS = {
+  mail: {
+    tabs: MAIL_TABS,
+    desc: "광고·뉴스레터와 <b>의뢰</b>를 뺀 지메일입니다. 의뢰는 왼쪽 <b>의뢰관리</b>에서 봅니다. " +
+          "분류·기간·검색으로 좁혀 보고, 메일을 누르면 전문이 열리며 그 자리에서 회신할 수 있습니다."
+  },
+  inquiries: {
+    tabs: INQUIRY_TABS,
+    desc: "홈페이지 문의·견적 폼으로 들어온 <b>의뢰</b>만 모았습니다. " +
+          "기간·검색으로 좁혀 보고, 메일을 누르면 전문이 열리며 그 자리에서 회신할 수 있습니다."
+  }
+};
+
+/* 화면 상태는 화면별로 따로 둔다 — 메일관리에서 3쪽을 보다가 의뢰관리로 갔는데
+   3쪽부터 시작하면 안 된다. 두 화면이 같은 변수를 쓰면 그런 일이 생긴다. */
+var mailUI = {
+  mail:      { tab:"전체", range:"7d", search:"", page:1, maxPage:1, hasMore:false, paging:false, list:[] },
+  inquiries: { tab:"의뢰", range:"7d", search:"", page:1, maxPage:1, hasMore:false, paging:false, list:[] }
+};
+
+function mailTabQuery(tabs, key){
+  for (var i=0; i<tabs.length; i++) if (tabs[i].key === key) return tabs[i].q;
+  return tabs[0].q;
 }
 
 /* ── 기간 (대표 지시 2026-08-09 — "최근 1주일치가 나오게 하고 그 이상이면 6개월치")
@@ -5370,38 +5419,33 @@ function mailSearchTerm(raw){
   return toks.map(function(t){ return '"' + t.slice(0, 60) + '"'; }).join(" ");
 }
 
-/* 분류·기간·검색 → 실제 지메일 검색어. 쿼리를 만드는 곳은 여기 하나뿐이다(단일 출처). */
-function mailBuildQuery(tab, range, search){
-  var q = mailTabQuery(tab) + " " + mailRangeQuery(range);
+/* 분류·기간·검색 → 실제 지메일 검색어. 쿼리를 만드는 곳은 여기 하나뿐이다(단일 출처).
+   tabs 를 인자로 받는 이유는 메일관리와 의뢰관리가 이 함수를 같이 쓰기 때문이다. */
+function mailBuildQuery(tabs, tab, range, search){
+  var q = mailTabQuery(tabs, tab) + " " + mailRangeQuery(range);
   var s = mailSearchTerm(search);
   return s ? q + " " + s : q;
 }
 
 var MAIL_PAGE_SIZE = 20;   /* 대표 지시 — 한 페이지 20건 */
 
-/* 화면 상태. 쿼리 문자열에서 역산하지 않고 이 네 값이 단일 출처다
-   (검색창에서 쿼리가 사라졌으므로 역산할 대상 자체가 없다). */
-var mailTab    = "전체";
-var mailRange  = "7d";
-var mailSearch = "";
-var mailPage   = 1;
+/* 화면 상태(탭·기간·검색·페이지·목록)는 위 mailUI 에 화면별로 들어 있다.
+   전에는 여기 모듈 변수 한 벌이었는데, 화면이 둘이 되면서 그대로 두면 서로 덮어쓴다.
 
-var mailList = [];
+   페이징은 hasMore 로만 알 수 있다 — 전체 개수를 주는 API 가 없으므로 총 페이지 수를 모른다.
+   지어내지 않고 "확인된 만큼"(maxPage)만 그린다. */
+
 var mailDrafts = {};      /* threadId → 작성 중 본문. 발송 실패해도 날아가지 않게 보관 */
 var mailPreviewed = {};   /* threadId → 미리보기를 통과한 본문. 이것과 같아야만 보낼 수 있다 */
 
-/* 페이징은 hasMore 로만 알 수 있다 — 전체 개수를 주는 API 가 없으므로 총 페이지 수를 모른다.
-   지어내지 않고 "확인된 만큼"만 그린다. */
-var mailHasMore = false;
-var mailMaxPage = 1;      /* 존재가 확인된 가장 큰 페이지 번호 */
-var mailPaging  = false;  /* 수신부가 hasMore 를 주는가. 옛 응답이면 false → 페이징을 숨긴다 */
-
-/* 요청 일련번호와 진행 중인 요청은 renderMail 바깥(모듈 수준)에 둔다.
-   renderMail 안의 지역변수로 두면 화면을 다시 그릴 때 0으로 되돌아가서,
+/* 요청 일련번호와 진행 중인 요청은 renderMailView 바깥(모듈 수준)에 둔다.
+   renderMailView 안의 지역변수로 두면 화면을 다시 그릴 때 0으로 되돌아가서,
    앞 화면이 띄워 둔 응답이 늦게 도착했을 때 "최신"으로 오인된다.
    그 응답은 떨어져 나간 DOM 에 그려지므로 눈에는 안 보이지만
-   mailPaging·mailPage·mailMaxPage 같은 모듈 상태를 조용히 덮어써서
-   다음 그리기부터 페이저가 틀어진다. */
+   mailUI[화면].paging·page·maxPage 를 조용히 덮어써서 다음 그리기부터 페이저가 틀어진다.
+
+   메일관리와 의뢰관리가 이 하나를 같이 쓰는 것은 의도한 것이다 — 화면을 옮기면
+   앞 화면의 요청은 어차피 버려야 하고, seq 가 하나면 그 판정이 저절로 된다. */
 var mailReqSeq = 0;
 var mailAbort  = null;
 
@@ -5413,6 +5457,68 @@ function mailFetch(q, start, signal){
       "&idToken="+encodeURIComponent(token)+"&t="+Date.now(), { cache:"no-store", signal: signal });
   }).then(function(r){ return r.json(); });
 }
+/* ── 사이드바 [의뢰관리] 배지 — 안 읽은 의뢰 개수
+      (대표 지시 2026-08-09 "이쪽에 의뢰(문의) 메일이 들어오면, 표시해줘")
+
+   의뢰는 돈이 되는 유일한 메일이라, 안 읽은 것이 있으면 메뉴에서 바로 보여야 한다.
+   판정 조건은 새로 쓰지 않고 INQUIRY_TABS 의 쿼리를 그대로 쓴다 — 같은 뜻을 두 곳에
+   적으면 반드시 한쪽만 고쳐져서 배지와 목록이 어긋난다.
+
+   개수는 응답 mails.length 다 — 수신부에 총계 API 가 없으므로 없는 숫자를 지어내지 않는다.
+   요청 limit 이 MAIL_PAGE_SIZE(20)라 20건이 꽉 차면 "더 있을 수 있다"는 뜻이므로 "20+" 로 적는다.
+
+   ⚠️ 읽음 처리는 아직 없다. 수신부(Apps Script)에 markRead 액션이 필요한데 이번 범위 밖이다.
+      지금은 대표가 지메일에서 읽으면 그때 반영된다(최대 5분). */
+function mailBadgeQuery(){ return INQUIRY_TABS[0].q + " is:unread"; }
+
+/* 갱신 간격 5분. 과제 2에서 요청과 재그리기를 줄여 놓고 배지가 도로 늘리면 본말전도라
+   60초 시트 동기화 주기에는 얹지 않고 별도 타이머로 돈다. 의뢰는 하루 몇 건 단위여서
+   5분 지연이 업무에 영향을 주지 않는다. */
+var MAIL_BADGE_TTL = 5*60*1000;
+
+var mailBadgeCount = 0;      /* 0 = 아무것도 안 보임. 모름·실패도 0으로 떨어뜨린다 */
+var mailBadgeAt    = 0;
+var mailBadgeBusy  = false;
+
+function mailBadgeText(){
+  if (!mailBadgeCount) return "";
+  return mailBadgeCount >= MAIL_PAGE_SIZE ? (MAIL_PAGE_SIZE + "+") : String(mailBadgeCount);
+}
+
+/* 배지 숫자만 제자리에서 고친다. render()·buildNav() 를 부르지 않는다 —
+   과제 2에서 없앤 깜박임을 배지가 되살리면 안 된다. */
+function paintMailBadge(){
+  var item = document.querySelector(".nav-item[href='#inquiries']");
+  if (!item) return;
+  var b = item.querySelector("[data-mail-badge]");
+  var t = mailBadgeText();
+  if (!t){ if (b) b.remove(); return; }
+  if (!b){
+    b = document.createElement("span");
+    b.className = "soon badge";                 /* 준비중 칩과 같은 자리·같은 모양, 색만 다르다 */
+    b.setAttribute("data-mail-badge", "");
+    item.appendChild(b);
+  }
+  if (b.textContent !== t) b.textContent = t;
+}
+
+/* 수신부가 죽었거나 권한이 없으면 배지를 그냥 숨긴다 — 메뉴에 오류를 띄우지 않는다.
+   오래된 숫자를 최신인 척 남겨두는 것이 제일 나쁘므로, 실패하면 이전 숫자를 지운다. */
+function mailBadgeRefresh(force){
+  if (window.__MOCK__ || !AUTH.user || !AUTH.isAdmin) return;
+  if (document.hidden) return;                  /* 안 보는 탭에서는 요청하지 않는다 */
+  if (mailBadgeBusy) return;
+  if (!force && (Date.now() - mailBadgeAt) < MAIL_BADGE_TTL) return;
+  mailBadgeBusy = true;
+  mailBadgeAt = Date.now();                     /* 실패해도 갱신한다 — 죽은 수신부를 5분마다만 두드리게 */
+  mailFetch(mailBadgeQuery(), 0).then(function(j){
+    mailBadgeCount = (j && !j.error && Array.isArray(j.mails)) ? j.mails.length : 0;
+    paintMailBadge();
+  }).catch(function(){
+    mailBadgeCount = 0; paintMailBadge();
+  }).finally(function(){ mailBadgeBusy = false; });
+}
+
 /* 스레드 전문. 목록은 snippet 만 주므로 모달을 열 때 따로 받아온다. */
 function mailBodyFetch(id){
   if (!AUTH.user) return Promise.reject(new Error("로그인이 필요합니다."));
@@ -5705,38 +5811,46 @@ function bindMailComposer(root, m, idx, onClose){
 }
 
 /* 페이지 번호 — 총 개수를 주는 API 가 없으므로 "확인된 만큼"만 그린다.
-   mailMaxPage 는 존재가 확인된 가장 큰 번호이고, hasMore 면 다음 하나를 더 보여준다. */
-function mailPagerHTML(){
-  if (!mailPaging) return "";                         /* 옛 응답(hasMore 없음) → 페이징을 숨긴다 */
-  var last = Math.max(mailMaxPage, mailPage + (mailHasMore ? 1 : 0));
+   s.maxPage 는 존재가 확인된 가장 큰 번호이고, hasMore 면 다음 하나를 더 보여준다.
+   s = mailUI[화면] 상태. 메일관리와 의뢰관리가 같이 쓰므로 모듈 변수 대신 인자로 받는다. */
+function mailPagerHTML(s){
+  if (!s.paging) return "";                           /* 옛 응답(hasMore 없음) → 페이징을 숨긴다 */
+  var last = Math.max(s.maxPage, s.page + (s.hasMore ? 1 : 0));
   if (last <= 1) return "";
   var nums = [];
   if (last <= 9){ for (var i=1; i<=last; i++) nums.push(i); }
   else {
     nums.push(1);
-    for (var k=mailPage-1; k<=mailPage+1; k++) if (k>1 && k<last) nums.push(k);
+    for (var k=s.page-1; k<=s.page+1; k++) if (k>1 && k<last) nums.push(k);
     nums.push(last);
     nums = nums.filter(function(v,i,a){ return a.indexOf(v)===i; }).sort(function(a,b){ return a-b; });
   }
-  var h = "<button class='pg' data-mail-pg='"+(mailPage-1)+"'"+(mailPage<=1?" disabled":"")+">‹ 이전</button>";
+  var h = "<button class='pg' data-mail-pg='"+(s.page-1)+"'"+(s.page<=1?" disabled":"")+">‹ 이전</button>";
   var prev = 0;
   nums.forEach(function(n){
     if (prev && n > prev+1) h += "<span class='gap'>…</span>";
-    h += "<button class='pg"+(n===mailPage?" on":"")+"' data-mail-pg='"+n+"'>"+n+"</button>";
+    h += "<button class='pg"+(n===s.page?" on":"")+"' data-mail-pg='"+n+"'>"+n+"</button>";
     prev = n;
   });
-  h += "<button class='pg' data-mail-pg='"+(mailPage+1)+"'"+(mailHasMore?"":" disabled")+">다음 ›</button>";
+  h += "<button class='pg' data-mail-pg='"+(s.page+1)+"'"+(s.hasMore?"":" disabled")+">다음 ›</button>";
   return h;
 }
 
-function renderMail(){
+/* 메일관리와 의뢰관리가 같이 쓰는 렌더 함수 (대표 지시 2026-08-09).
+   view = "mail" | "inquiries". 다른 것은 분류 탭 목록과 설명문뿐이고,
+   기간·페이징·검색·본문 팝업·회신은 전부 이 한 벌을 공유한다.
+   복사본을 만들면 다음에 한쪽만 고쳐져서 두 화면이 조용히 어긋난다. */
+function renderMailView(view){
+  var V = MAIL_VIEWS[view] || MAIL_VIEWS.mail;
+  var s = mailUI[view] || mailUI.mail;
+  var isInquiry = (view === "inquiries");
   /* 설명문은 화면이 하는 일을 그대로 말한다 — 받은편지함 전부가 아니라 걸러서 보여준다.
      "받은편지함을 읽어옵니다"로 두면 안 보이는 메일이 없다고 오해한다. */
-  var html = pageHead("mail", "광고·뉴스레터를 뺀 지메일입니다. 분류·기간·검색으로 좁혀 보고, 메일을 누르면 전문이 열리며 그 자리에서 회신할 수 있습니다.", "");
+  var html = pageHead(view, V.desc, "");
   if (!AUTH.isAdmin){
     html += "<section class='panel' style='background:transparent;border:0;box-shadow:none'>"+
       "<div class='placeholder'><div class='ico'>🔒</div><h3>권한 없음</h3>"+
-      "<p>메일관리는 대표 계정(어드민)만 열람할 수 있습니다.</p></div></section>";
+      "<p>"+(isInquiry?"의뢰관리":"메일관리")+"는 대표 계정(어드민)만 열람할 수 있습니다.</p></div></section>";
     C.innerHTML = html;
     return;
   }
@@ -5745,7 +5859,11 @@ function renderMail(){
      무엇을 보고 있는지 확인하고 싶을 때 확인할 수 있어야 한다. */
   html += "<section class='panel'>"+
       "<div class='mail-filters'>"+
-        "<div class='mail-frow'><span class='mail-flabel'>분류</span><div class='proj-chips' data-mail-tabs></div></div>"+
+        /* 의뢰관리는 분류가 하나뿐이라 칩 줄을 아예 그리지 않는다 —
+           선택지가 하나인 컨트롤은 화면만 어지럽힌다. */
+        (V.tabs.length > 1
+          ? "<div class='mail-frow'><span class='mail-flabel'>분류</span><div class='proj-chips' data-mail-tabs></div></div>"
+          : "")+
         "<div class='mail-frow'><span class='mail-flabel'>기간</span><div class='proj-chips' data-mail-ranges></div></div>"+
         "<div class='mail-frow'><span class='mail-flabel'>검색</span>"+
           "<div class='mail-search'>"+
@@ -5771,7 +5889,7 @@ function renderMail(){
   var noteEl  = C.querySelector("[data-mail-note]");
   var bodyEl  = C.querySelector("[data-mail-body]");
   var pagerEl = C.querySelector("[data-mail-pager]");
-  qEl.value = mailSearch;
+  qEl.value = s.search;
 
   /* 검색은 [검색] 버튼·Enter·×(clear) 에서만 나간다. 입력 이벤트에는 붙이지 않는다 —
      한 글자마다 요청하면 스무 글자에 스무 번이고, 수신부는 Apps Script 무료 할당량이다.
@@ -5779,34 +5897,36 @@ function renderMail(){
      "지금 무엇을 검색한 것인지"도 분명하다. */
 
   function drawChips(){
-    tabsEl.innerHTML = MAIL_TABS.map(function(t){
-      return "<button class='proj-chip"+(t.key===mailTab?" on":"")+"' data-mail-tab='"+esc(t.key)+"'>"+esc(t.key)+"</button>";
-    }).join("");
-    tabsEl.querySelectorAll("[data-mail-tab]").forEach(function(b){
-      /* 조건이 바뀌면 페이지도 "아는 것"도 전부 초기화한다.
-         앞 조건에서 3쪽까지 봤다는 사실은 새 조건과 아무 관계가 없다 —
-         남겨 두면 있지도 않은 페이지 번호를 그리게 된다. */
-      b.onclick = function(){ mailTab = b.getAttribute("data-mail-tab"); mailPage = 1; mailMaxPage = 1; refresh(); };
-    });
+    if (tabsEl){                                  /* 의뢰관리에는 분류 줄이 없다 */
+      tabsEl.innerHTML = V.tabs.map(function(t){
+        return "<button class='proj-chip"+(t.key===s.tab?" on":"")+"' data-mail-tab='"+esc(t.key)+"'>"+esc(t.key)+"</button>";
+      }).join("");
+      tabsEl.querySelectorAll("[data-mail-tab]").forEach(function(b){
+        /* 조건이 바뀌면 페이지도 "아는 것"도 전부 초기화한다.
+           앞 조건에서 3쪽까지 봤다는 사실은 새 조건과 아무 관계가 없다 —
+           남겨 두면 있지도 않은 페이지 번호를 그리게 된다. */
+        b.onclick = function(){ s.tab = b.getAttribute("data-mail-tab"); s.page = 1; s.maxPage = 1; refresh(); };
+      });
+    }
     rangeEl.innerHTML = MAIL_RANGES.map(function(r){
-      return "<button class='proj-chip"+(r.key===mailRange?" on":"")+"' data-mail-range='"+esc(r.key)+"'>"+esc(r.label)+"</button>";
+      return "<button class='proj-chip"+(r.key===s.range?" on":"")+"' data-mail-range='"+esc(r.key)+"'>"+esc(r.label)+"</button>";
     }).join("");
     rangeEl.querySelectorAll("[data-mail-range]").forEach(function(b){
       /* 기간을 바꾸면 1페이지로 — 3페이지에서 범위만 바뀌면 무엇을 보는지 알 수 없다 */
-      b.onclick = function(){ mailRange = b.getAttribute("data-mail-range"); mailPage = 1; mailMaxPage = 1; refresh(); };
+      b.onclick = function(){ s.range = b.getAttribute("data-mail-range"); s.page = 1; s.maxPage = 1; refresh(); };
     });
-    rawEl.textContent = mailBuildQuery(mailTab, mailRange, mailSearch);
+    rawEl.textContent = mailBuildQuery(V.tabs, s.tab, s.range, s.search);
   }
 
   function drawPager(){
-    var h = mailPagerHTML();
+    var h = mailPagerHTML(s);
     pagerEl.style.display = h ? "" : "none";
     pagerEl.innerHTML = h;
     pagerEl.querySelectorAll("[data-mail-pg]").forEach(function(b){
       b.onclick = function(){
         var n = parseInt(b.getAttribute("data-mail-pg"), 10);
-        if (!n || n < 1 || n === mailPage) return;
-        mailPage = n; load();
+        if (!n || n < 1 || n === s.page) return;
+        s.page = n; load();
       };
     });
   }
@@ -5820,7 +5940,7 @@ function renderMail(){
   }
 
   function load(){
-    var q = mailBuildQuery(mailTab, mailRange, mailSearch);
+    var q = mailBuildQuery(V.tabs, s.tab, s.range, s.search);
     var seq = ++mailReqSeq;
     /* 동시 요청은 1건만 둔다 — 새 조건이 오면 앞 요청을 끊는다.
        (수신부의 실행까지 취소되지는 않는다. 브라우저 연결과 응답 처리를 정리하는 것이 목적이고,
@@ -5828,7 +5948,7 @@ function renderMail(){
     if (mailAbort) mailAbort.abort();
     var ac = new AbortController();
     mailAbort = ac;
-    var start = (mailPage - 1) * MAIL_PAGE_SIZE;
+    var start = (s.page - 1) * MAIL_PAGE_SIZE;
     /* 페이지를 옮기는 중에는 목록을 지우지 않는다 — 화면이 비면 답답하다. 흐리게만 한다. */
     var first = !bodyEl.querySelector("[data-mail-row]");
     if (first) bodyEl.innerHTML = "<div class='empty'>메일을 불러오는 중…</div>";
@@ -5837,29 +5957,32 @@ function renderMail(){
     rawEl.textContent = q;
 
     mailFetch(q, start, ac.signal).then(function(j){
-      if (curRoute() !== "mail" || seq !== mailReqSeq) return;   /* 화면을 떠났거나 조건이 바뀌었으면 폐기 */
+      if (curRoute() !== view || seq !== mailReqSeq) return;   /* 화면을 떠났거나 조건이 바뀌었으면 폐기 */
       mailAbort = null;
       bodyEl.classList.remove("busy");
       if (!j || j.error){
         noteEl.textContent = "";
         bodyEl.innerHTML = "<div class='empty'>메일을 불러오지 못했습니다. "+esc(mailErrText(j && j.error))+"</div>";
-        mailPaging = false; drawPager(); return;
+        s.paging = false; drawPager(); return;
       }
-      mailList = j.mails || [];
+      s.list = j.mails || [];
       /* hasMore 를 주지 않는 옛 응답이면 페이징 자체를 숨긴다 — 있지도 않은 페이지를 그리지 않기 위해 */
-      mailPaging = (typeof j.hasMore === "boolean");
-      mailHasMore = mailPaging && j.hasMore;
-      if (!mailPaging){ mailPage = 1; mailMaxPage = 1; }
-      else mailMaxPage = Math.max(mailMaxPage, mailPage + (mailHasMore ? 1 : 0));
-      paintRows(mailList);
+      s.paging = (typeof j.hasMore === "boolean");
+      s.hasMore = s.paging && j.hasMore;
+      if (!s.paging){ s.page = 1; s.maxPage = 1; }
+      else s.maxPage = Math.max(s.maxPage, s.page + (s.hasMore ? 1 : 0));
+      paintRows(s.list);
       drawPager();
       var rangeLabel = "";
-      MAIL_RANGES.forEach(function(r){ if (r.key === mailRange) rangeLabel = r.label; });
-      noteEl.textContent = mailTab + " · " + rangeLabel +
-        (mailSearch.trim() ? " · 검색 “" + mailSearch.trim() + "”" : "") +
-        " · " + mailList.length + "건" + (mailPaging ? " (" + mailPage + "쪽)" : "");
+      MAIL_RANGES.forEach(function(r){ if (r.key === s.range) rangeLabel = r.label; });
+      noteEl.textContent = s.tab + " · " + rangeLabel +
+        (s.search.trim() ? " · 검색 “" + s.search.trim() + "”" : "") +
+        " · " + s.list.length + "건" + (s.paging ? " (" + s.page + "쪽)" : "");
+      /* 의뢰 목록을 방금 받았으니 배지 숫자도 같은 시점으로 맞춘다.
+         TTL 안이면 mailBadgeRefresh 가 스스로 걸러서 요청을 내지 않는다(화면도 다시 그리지 않는다). */
+      if (isInquiry) mailBadgeRefresh();
     }).catch(function(err){
-      if (curRoute() !== "mail" || seq !== mailReqSeq) return;   /* 끊긴 앞 요청(AbortError)도 여기서 걸러진다 */
+      if (curRoute() !== view || seq !== mailReqSeq) return;   /* 끊긴 앞 요청(AbortError)도 여기서 걸러진다 */
       mailAbort = null;
       bodyEl.classList.remove("busy");
       noteEl.textContent = "";
@@ -5870,26 +5993,27 @@ function renderMail(){
 
   function applySearch(){
     var v = (qEl.value||"");
-    if (v === mailSearch) { refresh(); return; }
-    mailSearch = v;
-    mailPage = 1; mailMaxPage = 1;    /* 검색어가 바뀌면 1페이지부터 */
+    if (v === s.search) { refresh(); return; }
+    s.search = v;
+    s.page = 1; s.maxPage = 1;        /* 검색어가 바뀌면 1페이지부터 */
     refresh();
   }
   C.querySelector("[data-mail-go]").onclick = applySearch;
   C.querySelector("[data-mail-reload]").onclick = function(){ refresh(); };
   C.querySelector("[data-mail-clear]").onclick = function(){
-    qEl.value = ""; mailSearch = ""; mailPage = 1; mailMaxPage = 1; refresh();
+    qEl.value = ""; s.search = ""; s.page = 1; s.maxPage = 1; refresh();
   };
   qEl.onkeydown = function(e){ if (e.key === "Enter"){ e.preventDefault(); applySearch(); } };
   qEl.onsearch = applySearch;   /* type=search 의 × 로 지웠을 때도 반영 */
 
-  mailPage = 1; mailMaxPage = 1;
+  s.page = 1; s.maxPage = 1;
   refresh();
 }
 
 var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
-  memos:renderMemos, mail:renderMail, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
+  memos:renderMemos, mail:function(){ renderMailView("mail"); },
+  inquiries:function(){ renderMailView("inquiries"); }, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
   newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov,
   subs:renderSubs, library:renderLibrary, homepage:renderHomepage
@@ -6034,6 +6158,11 @@ function startDashboard(){
                   .catch(function(){ state.refreshing=false; state.refreshFailed=true; updateSyncNote(); });
       }
     }, 60000);
+
+    /* 안 읽은 의뢰 배지는 별도 타이머로 5분마다 — 위 60초 주기에 얹지 않는다.
+       근거는 MAIL_BADGE_TTL 선언부 주석. mailBadgeRefresh() 안에서 document.hidden 과
+       TTL 을 다시 확인하므로 탭이 숨겨져 있으면 요청이 나가지 않는다. */
+    setInterval(function(){ mailBadgeRefresh(); }, MAIL_BADGE_TTL);
   }
   buildNav();
   /* 캐시가 있으면 먼저 그린다 — GAS 응답을 기다리는 1~4초 동안 빈 화면을 보여주지 않는다.
@@ -6059,6 +6188,7 @@ function startDashboard(){
     markDataSeen();               /* 최초 로드분을 기준선으로 — 첫 주기가 헛돌지 않게 */
     render();
   })();
+  mailBadgeRefresh(true);         /* 로그인 직후 1회. 그 뒤는 위 5분 타이머만 */
 }
 
 /* ============ 구글 로그인 게이트 (Firebase) ============
