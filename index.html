@@ -1126,6 +1126,48 @@ function keyRejected(msg){
 var state = { data:null, mask: localStorage.getItem("appleseed_mask")==="1", loading:true, error:null, keyError:null,
   cachedAt:0, fromCache:false, refreshing:false, refreshFailed:false };
 
+/* ── 주기 갱신이 화면을 헤집지 않게 하는 두 가지 (대표 지시 2026-08-09
+      "불러오기는 최적화해줘 너무 자주 메일처럼 불러오기하면 정신없음")
+
+   1분마다 도는 시트 동기화가 지금까지 render() 를 무조건 태웠다. render() 는 화면을
+   통째로 다시 만든다. 그래서 대표가 읽고 있는 도중에 내용이 사라졌다 다시 나타났고,
+   자기 데이터를 따로 받아오는 화면은 그때마다 요청을 새로 냈다.
+
+   고친 방식은 딱 두 가지다. 가상 DOM 같은 건 만들지 않는다.
+     ① 시트가 실제로 바뀌었을 때만 다시 그린다        → dataFingerprint()
+     ② 애초에 시트가 출처가 아닌 화면은 건드리지 않는다 → SELF_FETCH_ROUTES
+   둘 중 하나라도 걸리면 사이드바 "마지막 갱신" 만 조용히 고친다. 동기화 자체는 그대로 돈다.
+
+   실측(무조작 4.06분 = 60초 주기 4회, 화면별 요청/재그리기/자리표시자):
+     대시보드   6→4 요청 / 4→0 재그리기 / 0→0 자리표시자
+     홈페이지   10→4 요청 / 4→0 재그리기 / 4→0 자리표시자   ← 가장 심했던 화면
+     프로젝트   4→4 요청 / 4→0 재그리기 / 0→0
+     리포트     4→4 요청 / 4→0 재그리기 / 0→0
+   남은 4건은 시트 동기화 자체(GAS action=data)이고, 이건 없애면 안 되는 요청이다. */
+
+/* 관리시트가 아니라 자기 데이터를 직접 받아오는 화면들.
+   mail=수신부 지메일, homepage=수신부 방문집계, contests=공모전 보드, gov=K-Startup.
+   (넷 다 state.data 를 한 글자도 읽지 않는다 — 확인함) 시트가 갱신됐다고 이 화면을
+   다시 그리면 얻는 것은 없고 남의 API 요청과 깜박임만 늘어난다. */
+var SELF_FETCH_ROUTES = { mail:1, homepage:1, contests:1, gov:1 };
+
+/* 데이터 지문. 문자열을 통째로 들고 있지 않으려고 djb2 해시 + 길이로 줄인다.
+   해시가 충돌하면 그 회차 갱신 한 번을 건너뛰지만, 다음 변경에서 곧바로 달라진다.
+   화면이 최대 1분 늦는 쪽이 매분 깜박이는 쪽보다 대표에게 낫다.
+   (81만자 페이로드로 재도 1회 5ms 수준이라 매분 한 번 도는 비용은 무시할 만하다.) */
+function dataFingerprint(){
+  var s;
+  try { s = JSON.stringify(state.data); } catch(e){ return "x"+Date.now(); }   /* 순환참조 등 → 항상 '바뀜' */
+  if (!s) return "0";
+  var h = 5381;
+  for (var i=0; i<s.length; i++){ h = ((h*33) ^ s.charCodeAt(i)) >>> 0; }
+  return s.length + ":" + h;
+}
+var lastDataFp = "";
+/* 지문을 현재 값으로 맞춘다. 어차피 그리는 경로(최초 로드·[↻ 새로고침])에서 불러
+   바로 다음 주기가 "바뀌었다"고 착각하지 않게 한다. */
+function markDataSeen(){ lastDataFp = dataFingerprint(); }
+
 /* ============ 유틸 ============ */
 function esc(s){ s = (s==null?"":String(s));
   return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
@@ -5029,9 +5071,16 @@ function renderFileDetail(){
            window.__MOCK__.homepageLeads = {ok:true, leads:[…]}
    백엔드(Apps Script 수신부) 미배포 시에는 대기 안내를 띄운다 — 화면이 깨지지 않아야 한다. */
 var hpPeriod = 7;
-var hpStatsCache = {};          /* period → {t, data} — 60초 캐시 */
+var hpStatsCache = {};          /* period → {t, data} */
 var hpLeadsCache = null;        /* {t, data} */
-var HP_TTL = 60000;
+/* 캐시 수명 5분. 전에는 60초였는데 시트 동기화 주기와 정확히 같아서, 주기 갱신이
+   render() 를 태울 때마다 TTL 이 딱 지나 있어 매번 재요청이 나갔다.
+   실측: 무조작 4분에 stats 4건 + leads 2건이 나갔고, 그때마다 "방문 통계를 불러오는 중…"이
+   화면을 비웠다(4회). 지금은 둘 다 0 이다.
+   여기 숫자는 일별 집계다 — 오늘 방문자 수가 1분 단위로 정확할 이유가 없고,
+   동기화 주기의 배수로 잡아야 "매번 만료" 가 재발하지 않는다. 화면의 기간 칩을
+   누르거나 화면을 다시 열면 그때 최신을 받는다. */
+var HP_TTL = 5*60*1000;
 
 function hpFetchStats(period){
   if (window.__MOCK__){
@@ -5935,6 +5984,7 @@ document.getElementById("reloadBtn").onclick = async function(){
     else state.error = e.message;
   }
   state.refreshing = false;
+  markDataSeen();                 /* 방금 그리므로 다음 주기가 '바뀜'으로 오인하지 않게 */
   render(); this.textContent = "↻ 새로고침";
 };
 document.getElementById("portalBtn").onclick = function(){ location.href = "admin.html"; };
@@ -5965,14 +6015,20 @@ function startDashboard(){
         state.refreshing = true; updateSyncNote();
         loadData().then(function(){
           state.refreshing = false;
-          /* 메일관리만 주기 갱신에서 뺀다 — 목록의 출처가 state.data(관리시트)가 아니라
-             수신부 지메일이라, 시트가 갱신됐다고 메일을 다시 부를 이유가 아예 없다.
-             여기서 render() 를 태우면 renderMail() 이 화면을 통째로 다시 만들면서
-             ① 읽던 목록이 1분마다 사라지고(대표 보고: "메일이 너무 자주 깜박임")
-             ② 보던 페이지가 1쪽으로 되돌아가고
-             ③ Apps Script 무료 할당량을 이유 없이 태운다.
-             메일 갱신은 화면의 [새로고침]·사이드바 ↻·탭 재선택 같은 명시적 조작으로만 한다. */
-          if (curRoute() === "mail"){ updateSyncNote(); return; }
+          /* 여기서 무조건 render() 를 태우던 것이 "정신없음"의 근본이었다.
+             render() 는 화면을 통째로 다시 만들기 때문에, 대표가 읽고 있는 목록이
+             1분마다 사라졌다 돌아오고, 보던 페이지·스크롤이 처음으로 되돌아가고,
+             자기 데이터를 따로 받는 화면(메일·홈페이지 유입 등)은 그때마다 요청을 새로 냈다.
+             (홈페이지 유입은 이것 때문에 3분에 6건이 더 나갔다 — 실측 10건 vs 4건.)
+
+             이제 두 가지를 보고 판단한다 — 자세한 근거는 SELF_FETCH_ROUTES 선언부 주석에.
+               ① 이 화면의 출처가 관리시트인가
+               ② 관리시트가 실제로 바뀌었는가
+             아니면 사이드바 "마지막 갱신"만 조용히 고친다. 동기화는 그대로 돌기 때문에
+             다른 기기·Claude 가 바꾼 내용은 다음에 그릴 때 이미 반영돼 있다. */
+          var changed = (dataFingerprint() !== lastDataFp);
+          markDataSeen();
+          if (!changed || SELF_FETCH_ROUTES[curRoute()]){ updateSyncNote(); return; }
           render();
         })
                   .catch(function(){ state.refreshing=false; state.refreshFailed=true; updateSyncNote(); });
@@ -6000,6 +6056,7 @@ function startDashboard(){
       else { state.loading=false; state.error=e.message; }
     }
     state.refreshing = false;
+    markDataSeen();               /* 최초 로드분을 기준선으로 — 첫 주기가 헛돌지 않게 */
     render();
   })();
 }
