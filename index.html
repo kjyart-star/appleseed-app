@@ -2555,10 +2555,14 @@ function monthlyAgg(){
     var pv = payrollSpend(x);
     if (pv) ensure(k).cost += pv;   /* 미지급(0)으로 빈 달이 그래프에 생기지 않게 — 고정경비와 같은 처리 */
   });
-  /* 고정경비 — 연·월 매트릭스라 날짜가 없다. 값이 0인 달은 건너뛰어 빈 달이 그래프에 생기지 않게 한다. */
+  /* 고정경비 — 연·월 매트릭스라 날짜가 없다. 값이 0인 달은 건너뛰어 빈 달이 그래프에 생기지 않게 한다.
+     올해는 전월까지만 잡는다 — 이번 달분은 아직 청구·정산 전이고, 시트에는 임대료처럼 연말까지
+     미리 채워둔 값이 있어 그대로 더하면 쓰지도 않은 돈이 비용으로 잡힌다. (누적 영업이익 카드와 같은 기준) */
+  var fcNow = seoulNow(), fcThisYear = fcNow.getFullYear(), fcLimit = fcNow.getMonth();
   (d.fixedcost||[]).forEach(function(r){
     var y = Number(r.year); if(!y) return;
-    for (var fm=1; fm<=12; fm++){
+    var last = (y === fcThisYear) ? fcLimit : 12;
+    for (var fm=1; fm<=last; fm++){
       var fv = fcMonthVal(r, fm);
       if (fv) ensure(y+"-"+pad2(fm)).cost += fv;
     }
@@ -5049,9 +5053,12 @@ function ytdProfit(){
   (d.expense||[]).forEach(function(x){ if (inYtd(keyOf(x.date))) o.exp += expSupply(x); });
   cardsAll().forEach(function(x){ if (inYtd(keyOf(x.date))) o.card += Number(x.amount)||0; });
   payoutsAll().forEach(function(x){ if (inYtd(keyOf(x.date))) o.payout += payoutPaid(x); });
+  /* 고정비는 전월까지만 잡는다 — 이번 달분은 아직 청구·정산 전이라 실제 비용이 아니다.
+     시트에는 임대료처럼 연말까지 미리 채워둔 항목이 있어, 이번 달 이후를 더하면 쓰지도 않은 돈이 적자로 잡힌다. */
+  o.fixedUpto = M - 1;
   (d.fixedcost||[]).forEach(function(r){
     if (Number(r.year)!==Y) return;
-    for (var m=1; m<=M; m++) o.fixed += fcMonthVal(r, m);
+    for (var m=1; m<=o.fixedUpto; m++) o.fixed += fcMonthVal(r, m);
   });
   (d.payroll||[]).forEach(function(x){
     var k = String(x.ym||"").slice(0,7); if (!inYtd(k)) return;
@@ -5094,8 +5101,10 @@ function ytdCardHTML(){
   if (y.unpaid > 0) h += "<br>미지급 급여 "+moneyWon(y.unpaid)+"은 아직 나가지 않아 비용에 포함되지 않았습니다.";
   h += "</div>";
   /* 비용 내역 — 합계 대비 비율. 다섯 갈래는 각각 다른 테이블에서만 뽑아 중복이 없다. */
+  var fcLabel = "고정비 (우리 부담)";
+  if (y.fixedUpto >= 1) fcLabel += " · 1~" + y.fixedUpto + "월";
   var items = [["매입", y.exp], ["법인카드", y.card], ["외주 인건비", y.payout],
-               ["고정비 (우리 부담)", y.fixed], ["급여 (지급분)", y.payroll]];
+               [fcLabel, y.fixed], ["급여 (지급분)", y.payroll]];
   h += "<div style='margin-top:18px;border-top:1px solid var(--line);padding-top:14px'>"+
     "<div style='font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);"+
     "font-weight:800;margin-bottom:11px'>비용 내역</div>";
