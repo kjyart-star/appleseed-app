@@ -2081,7 +2081,9 @@ var FIELDS = {
     ["m5","5월","number"],["m6","6월","number"],["m7","7월","number"],["m8","8월","number"],
     ["m9","9월","number"],["m10","10월","number"],["m11","11월","number"],["m12","12월","number"],
     ["share","부담률(%) — 비우면 100","number"],
-    ["note","메모","text"] ]
+    ["note","메모","text"] ],
+  offset: [ ["date","날짜","date"], ["type","구분","select",["받을금액","현금수령"]],
+    ["counterpart","상대처","text"], ["amount","금액(원)","number"], ["memo","메모","text"] ]
 };
 var NUMS = { amount:1, contract_amount:1, progress:1, year:1, payday:1, share:1,
   m1:1,m2:1,m3:1,m4:1,m5:1,m6:1,m7:1,m8:1,m9:1,m10:1,m11:1,m12:1 };
@@ -2278,7 +2280,7 @@ function openForm(table, row, defaults){
     }
   };
 }
-function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses",cards:"expenses"}; return m[t]||t; }
+function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses",cards:"expenses",offset:"expenses"}; return m[t]||t; }
 
 async function delRow(table, id){
   var ok = await confirmDlg("정말 삭제할까요? 되돌릴 수 없습니다.", "삭제", "삭제 확인");
@@ -3721,6 +3723,104 @@ function bindFixedCost(){
   C.querySelectorAll("[data-fc-del]").forEach(function(b){ b.onclick=function(){ delRow("fixedcost", b.getAttribute("data-fc-del")); }; });
 }
 
+/* ---- 고정비 상계(相計) — 사무실 쉐어 정산 ----
+   고정비(임대료·정수기·인터넷·전기)는 상대 회사가 전액 결제하고, 우리는 그 회사에
+   받을 돈이 있어서 거기서 우리 부담분을 매달 차감한다. 우리 통장에서는 고정비가 나가지 않는다.
+   그래서 여기서 보는 것은 "받을 돈이 얼마나 남았는가" 하나뿐이다.
+   ※ 차감액은 시트에 저장하지 않는다. 저장하면 고정경비 시트와 이중 계상되므로,
+      기존 fcMonthVal(고정경비 우리 부담분)로 매번 계산한다.
+   ※ 상계는 이미 고정경비로 잡혀 있는 금액이라 지출 합계·그래프에는 절대 넣지 않는다. */
+function offsetRows(){
+  return (state.data.offset||[]).slice()
+    .sort(function(a,b){ return String(b.date||"").localeCompare(String(a.date||"")); });
+}
+function offsetCalc(rows){
+  var recv = 0, cash = 0, earliest = null, cpCount = {};
+  rows.forEach(function(r){
+    var amt = Number(r.amount)||0, ds = String(r.date||"").slice(0,10);
+    if (r.type === "현금수령") cash += amt;
+    else { recv += amt; if (ds && (!earliest || ds < earliest)) earliest = ds; }
+    var cp = String(r.counterpart||"");
+    if (cp) cpCount[cp] = (cpCount[cp]||0) + 1;
+  });
+  /* 상대 회사명 — 가장 많이 등장한 counterpart */
+  var name = "", best = 0;
+  Object.keys(cpCount).forEach(function(k){ if (cpCount[k] > best){ best = cpCount[k]; name = k; } });
+  /* 차감 기간 = 가장 이른 받을금액의 해당 월 ~ 이번 달. 연도를 가로질러 (연,월)을 순회한다. */
+  var now = seoulNow(), curY = now.getFullYear(), curM = now.getMonth()+1;
+  var fc = state.data.fixedcost||[];
+  var ded = 0, months = 0, from = "", to = "";
+  if (earliest){
+    var y = Number(earliest.slice(0,4)), m = Number(earliest.slice(5,7));
+    from = y+"-"+pad2(m); to = curY+"-"+pad2(curM);
+    while (y < curY || (y === curY && m <= curM)){
+      months++;
+      for (var i=0;i<fc.length;i++){ if (Number(fc[i].year) === y) ded += fcMonthVal(fc[i], m); }
+      m++; if (m > 12){ m = 1; y++; }
+    }
+  }
+  return { recv:recv, cash:cash, ded:ded, months:months, from:from, to:to,
+    name:(name || "상대 회사"), bal:(recv - cash - ded) };
+}
+function offsetLine(label, note, val, sign){
+  return "<div style='display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:8px 0;border-bottom:1px solid var(--line)'>"+
+    "<span style='color:var(--ink-2)'>"+label+
+      (note ? "<span class='sec-note' style='display:block;margin-top:2px'>"+note+"</span>" : "")+"</span>"+
+    "<span class='tnum' style='font-weight:600;white-space:nowrap'>"+sign+comma(val)+"원</span></div>";
+}
+function offsetSection(){
+  var rows = offsetRows();
+  var c = offsetCalc(rows);
+  var h = "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>고정비 상계 · 사무실 쉐어</div>"+
+      "<h3>상계 정산 — "+esc(c.name)+"</h3>"+
+      "<div class='sec-note' style='margin-top:4px'>고정비는 "+esc(c.name)+"가 전액 결제하고, 우리가 받을 금액에서 매달 우리 부담분을 차감합니다. "+
+      "차감액은 위 <b>월별 고정비의 ‘우리 부담’</b> 값을 그대로 계산해 쓰며 따로 저장하지 않습니다.</div></div>"+
+    "<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>"+
+      "<button class='btn sm' data-of-add-recv>+ 받을 금액 등록</button>"+
+      "<button class='btn sm' data-of-add-cash>+ 현금 수령 등록</button></div></div>";
+  if (!rows.length){
+    return h + "<div class='empty'>받을 금액을 등록하면 상계 잔액이 계산됩니다.</div></section>";
+  }
+  /* 요약 카드 */
+  var low = (c.bal <= 0);
+  var dedNote = c.months ? (c.from+" ~ "+c.to+", "+c.months+"개월") : "받을 금액 등록 전 — 차감 없음";
+  h += "<div style='max-width:520px;margin-bottom:14px'>"+
+    offsetLine("받을 금액 총액", "", c.recv, "")+
+    offsetLine("상계 차감 (고정비)", dedNote, c.ded, "− ")+
+    offsetLine("현금 수령", "", c.cash, "− ")+
+    "<div style='display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:12px 0 2px'>"+
+      "<span style='font-weight:700'>남은 받을 금액</span>"+
+      "<span class='tnum' style='font-size:24px;font-weight:800;white-space:nowrap;color:"+(low?"var(--urgent)":"var(--accent-ink)")+"'>"+
+        comma(c.bal)+"원</span></div>";
+  if (low) h += "<div class='sum-chip' style='color:var(--urgent);background:var(--urgent-soft);border-color:var(--urgent)'>상계 소진 — 정산 방식 재확인 필요</div>";
+  h += "</div>";
+  /* 상계 내역 */
+  var body = "";
+  rows.forEach(function(r){
+    var cash = (r.type === "현금수령");
+    body += "<tr><td class='tnum'>"+esc(String(r.date||"").slice(0,10))+"</td>"+
+      "<td><span class='mini-tag "+(cash?"aicontent":"aivfx")+"'>"+esc(r.type||"")+"</span></td>"+
+      "<td>"+esc(r.counterpart||"")+"</td>"+
+      "<td class='r tnum'>"+moneyWon(r.amount)+"</td>"+
+      "<td>"+esc(r.memo||"")+"</td>"+
+      "<td class='r'><div class='row-actions'><button class='icon-btn' data-of-edit='"+r.id+"'>✎</button>"+
+        "<button class='icon-btn del' data-of-del='"+r.id+"'>🗑</button></div></td></tr>";
+  });
+  h += "<div class='tbl-scroll'><table><thead><tr><th>날짜</th><th>구분</th><th>상대처</th>"+
+    "<th class='r'>금액</th><th>메모</th><th class='r'>관리</th></tr></thead><tbody>"+body+"</tbody></table></div>";
+  return h + "</section>";
+}
+function bindOffset(){
+  var today = ymd(seoulNow());
+  var a1 = C.querySelector("[data-of-add-recv]");
+  if (a1) a1.onclick = function(){ openForm("offset", null, { type:"받을금액", date:today }); };
+  var a2 = C.querySelector("[data-of-add-cash]");
+  if (a2) a2.onclick = function(){ openForm("offset", null, { type:"현금수령", date:today }); };
+  C.querySelectorAll("[data-of-edit]").forEach(function(b){ b.onclick=function(){ openForm("offset", findById(state.data.offset, b.getAttribute("data-of-edit"))); }; });
+  C.querySelectorAll("[data-of-del]").forEach(function(b){ b.onclick=function(){ delRow("offset", b.getAttribute("data-of-del")); }; });
+}
+
 /* ---- 법인카드 (승인문자·카드명세서 자동수집 + 수동입력) ---- */
 var cardsPage = 1, cardsQ = "";
 var CARDS_PER = 20;
@@ -4305,6 +4405,7 @@ function renderExpenses(){
   html += expenseChartSection();
   html += expenseTotalSection();
   html += fixedCostSection();
+  html += offsetSection();
   html += cardsSection();
   html += subsSummarySection();
   var chips = "<div class='sum-chip'>전체 지출<b class='tnum'>"+moneyMan(sum)+"</b></div>";
@@ -4320,6 +4421,7 @@ function renderExpenses(){
   C.querySelector("[data-add]").onclick = function(){ openForm("expense", null); };
   bindExpenseChart();
   bindFixedCost();
+  bindOffset();
   bindCards();
   var sgo = C.querySelector("[data-subs-go]");
   if (sgo) sgo.onclick = function(){ location.hash = "#subs"; };
