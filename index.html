@@ -4862,7 +4862,10 @@ function expMonthlyRows(year){
   for (m=1; m<=12; m++) rows.push({ label:m+"월", key:year+"-"+pad2(m), fixed:0, card:0, exp:0, payout:0, payroll:0 });
   (state.data.fixedcost||[]).forEach(function(r){
     if (Number(r.year)!==year) return;
-    for (var k=1; k<=12; k++) rows[k-1].fixed += fcMonthVal(r, k);   /* 부담률 적용분만 */
+    /* 올해는 전월까지만 — 이번 달분은 아직 청구·정산 전이고, 시트에는 임대료처럼 연말까지 미리
+       채워둔 값이 있어 그대로 더하면 쓰지도 않은 돈이 그래프에 미래 막대로 선다. */
+    var fcLast = (year === seoulNow().getFullYear()) ? seoulNow().getMonth() : 12;
+    for (var k=1; k<=fcLast; k++) rows[k-1].fixed += fcMonthVal(r, k);   /* 부담률 적용분만 */
   });
   payoutMonthly(year).forEach(function(p){ rows[p.m-1].payout += p.paid; });   /* 실지급액만 */
   payrollAll().forEach(function(x){                                            /* 지급완료분의 차인지급액만 */
@@ -4955,8 +4958,9 @@ function expChartInner(){
   var nz = mrows.filter(function(r){ return expRowTotal(r) > 0; });
   var avg = nz.length ? Math.round(nz.reduce(function(a,r){ return a+expRowTotal(r); },0)/nz.length) : 0;
 
-  var tot = { fixed:0, card:0, exp:0, payout:0 };
-  rows.forEach(function(r){ tot.fixed+=r.fixed; tot.card+=r.card; tot.exp+=r.exp; tot.payout+=r.payout; });
+  /* payroll 을 빠뜨리면 expRowTotal 이 undefined 를 더해 NaN 이 되고, 총지출이 0 으로 보인다. */
+  var tot = { fixed:0, card:0, exp:0, payout:0, payroll:0 };
+  rows.forEach(function(r){ tot.fixed+=r.fixed; tot.card+=r.card; tot.exp+=r.exp; tot.payout+=r.payout; tot.payroll+=r.payroll; });
   var grand = expRowTotal(tot);
 
   /* 이번 달 / 지난 달은 실제 현재 월 기준(연도 선택과 무관) */
