@@ -660,6 +660,7 @@
   .att-badge.link{background:#10b981; color:#fff;}
   .att-badge.video{background:#f59e0b; color:#fff;}
   .att-badge.file{background:#8b5cf6; color:#fff;}
+  .att-badge.gray{background:#6b7280; color:#fff;}
   .att-item-name{font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .att-item-meta{font-size:11px; color:var(--ink-3); flex:none;}
   .att-item-del{color:var(--ink-3); cursor:pointer; font-size:14px; border:none; background:transparent; padding:2px 6px;}
@@ -2060,6 +2061,9 @@ var FIELDS = {
   subs: [ ["name","서비스명","text"], ["plan","플랜","text"], ["amount","금액","number"],
     ["currency","통화","select",["원","달러"]], ["cycle","결제주기","select",["월간","연간"]],
     ["renew_date","다음 갱신일","date"], ["memo","메모","text"] ],
+  cards: [ ["date","결제일","date"], ["card","카드","text"], ["merchant","가맹점","text"],
+    ["amount","금액(원)","number"], ["category","분류","select",["AI구독","외주","운영비","제작비","식대","교통","기타"]],
+    ["memo","메모","text"] ],
   fixedcost: [ ["year","연도","select",["2025","2026","2027"]], ["category","항목","text"], ["payday","결제일(매월 N일, 없으면 0)","number"],
     ["m1","1월","number"],["m2","2월","number"],["m3","3월","number"],["m4","4월","number"],
     ["m5","5월","number"],["m6","6월","number"],["m7","7월","number"],["m8","8월","number"],
@@ -2261,7 +2265,7 @@ function openForm(table, row, defaults){
     }
   };
 }
-function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses"}; return m[t]||t; }
+function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses",cards:"expenses"}; return m[t]||t; }
 
 async function delRow(table, id){
   var ok = await confirmDlg("정말 삭제할까요? 되돌릴 수 없습니다.", "삭제", "삭제 확인");
@@ -3672,13 +3676,209 @@ function bindFixedCost(){
   C.querySelectorAll("[data-fc-edit]").forEach(function(b){ b.onclick=function(){ openForm("fixedcost", findById(state.data.fixedcost, b.getAttribute("data-fc-edit"))); }; });
   C.querySelectorAll("[data-fc-del]").forEach(function(b){ b.onclick=function(){ delRow("fixedcost", b.getAttribute("data-fc-del")); }; });
 }
+
+/* ---- 법인카드 (승인문자·카드명세서 자동수집 + 수동입력) ---- */
+var cardsPage = 1, cardsQ = "";
+var CARDS_PER = 20;
+function ymKey(d){ return d.getFullYear()+"-"+pad2(d.getMonth()+1); }
+function cardsAll(){ return (state.data && state.data.cards) || []; }
+function cardsSorted(){
+  return cardsAll().slice().sort(function(a,b){ return String(b.date||"").localeCompare(String(a.date||"")); });
+}
+/* ym = "YYYY-MM", cat 이 주어지면 그 분류만 합산 */
+function cardsMonthSum(ym, cat){
+  return cardsAll().reduce(function(a,x){
+    if (String(x.date||"").slice(0,7) !== ym) return a;
+    if (cat && String(x.category||"") !== cat) return a;
+    return a + (Number(x.amount)||0);
+  }, 0);
+}
+/* 수집 경로 배지: 문자=파랑, 명세서=보라, 그 외(수동)=회색 */
+function cardSrcBadge(src){
+  var s = String(src||"").trim() || "수동";
+  var cls = s==="문자" ? "image" : (s==="명세서" ? "file" : "gray");
+  return "<span class='att-badge "+cls+"'>"+esc(s)+"</span>";
+}
+function cardsBodyHtml(){
+  var q = cardsQ.trim().toLowerCase();
+  var list = cardsSorted().filter(function(x){
+    if (!q) return true;
+    var hay = (String(x.merchant||"")+" "+String(x.card||"")+" "+String(x.category||"")).toLowerCase();
+    return hay.indexOf(q) >= 0;
+  });
+  var total = list.length;
+  if (!total){
+    return "<div class='empty'>"+(q
+      ? "검색 결과가 없습니다."
+      : "법인카드 내역이 없습니다. 카드 승인 문자와 카드사 명세서가 들어오면 이 표에 자동으로 쌓이고, ‘+ 카드결제 추가’로 직접 넣을 수도 있습니다.")+"</div>";
+  }
+  var pages = Math.max(1, Math.ceil(total / CARDS_PER));
+  if (cardsPage > pages) cardsPage = pages;
+  if (cardsPage < 1) cardsPage = 1;
+  var start = (cardsPage-1) * CARDS_PER;
+  var items = list.slice(start, start + CARDS_PER);
+  var listSum = list.reduce(function(a,x){ return a+(Number(x.amount)||0); }, 0);
+  var h = "<div class='tbl-scroll'><table><thead><tr><th>날짜</th><th>카드</th><th>가맹점</th><th>분류</th>"+
+    "<th class='r'>금액</th><th>출처</th><th class='r'>관리</th></tr></thead><tbody>";
+  items.forEach(function(x){
+    h += "<tr><td class='tnum'>"+esc(String(x.date||"").slice(0,10))+"</td>"+
+      "<td>"+esc(x.card||"")+"</td>"+
+      "<td style='font-weight:600'>"+esc(x.merchant||"")+"</td>"+
+      "<td><span class='mini-tag vfx'>"+esc(x.category||"기타")+"</span></td>"+
+      "<td class='r tnum'>"+moneyWon(x.amount)+"</td>"+
+      "<td>"+cardSrcBadge(x.src)+"</td>"+
+      "<td class='r'><div class='row-actions'><button class='icon-btn' data-card-edit='"+esc(x.id)+"'>✎</button>"+
+        "<button class='icon-btn del' data-card-del='"+esc(x.id)+"'>🗑</button></div></td></tr>";
+  });
+  h += "</tbody><tfoot><tr><td colspan='4' style='font-weight:700'>"+(q?"검색 합계":"전체 합계")+" ("+total+"건)</td>"+
+    "<td class='r tnum'>"+moneyWon(listSum)+"</td><td colspan='2'></td></tr></tfoot></table></div>";
+  if (pages > 1){
+    var from = Math.max(1, cardsPage - 2);
+    var to = Math.min(pages, from + 4);
+    from = Math.max(1, to - 4);
+    h += "<div class='proj-chips bd-pager'><button class='proj-chip' data-card-page='1'>« 처음</button>";
+    for (var pn = from; pn <= to; pn++){
+      h += "<button class='proj-chip"+(pn===cardsPage?" on":"")+"' data-card-page='"+pn+"'>"+pn+"</button>";
+    }
+    h += "<button class='proj-chip' data-card-page='"+pages+"'>끝 »</button></div>";
+  }
+  return h;
+}
+function cardsSection(){
+  var now = seoulNow();
+  var curYm = ymKey(now);
+  var prevYm = ymKey(new Date(now.getFullYear(), now.getMonth()-1, 1));
+  var chips = "<div class='sum-chip'>이번 달 사용액<b class='tnum'>"+moneyMan(cardsMonthSum(curYm))+"</b></div>"+
+    "<div class='sum-chip'>지난 달 사용액<b class='tnum'>"+moneyMan(cardsMonthSum(prevYm))+"</b></div>"+
+    "<div class='sum-chip'>전체 건수<b class='tnum'>"+comma(cardsAll().length)+"건</b></div>";
+  return "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>카드 결제 내역</div><h3>법인카드</h3></div>"+
+      "<button class='btn sm' data-card-add>+ 카드결제 추가</button></div>"+
+    "<div class='sum-strip'>"+chips+"</div>"+
+    "<div class='ct-controls' style='padding:14px 20px 0; margin-bottom:0'>"+
+      "<input class='proj-search' type='text' placeholder='가맹점·카드·분류 검색' data-card-search value='"+esc(cardsQ)+"'></div>"+
+    "<div data-card-body>"+cardsBodyHtml()+"</div></section>";
+}
+function drawCardsBody(){
+  var box = C.querySelector("[data-card-body]");
+  if (!box) return;
+  box.innerHTML = cardsBodyHtml();
+  bindCardsBody();
+  applyMask();
+}
+function bindCardsBody(){
+  C.querySelectorAll("[data-card-edit]").forEach(function(b){
+    b.onclick = function(){ openForm("cards", findById(cardsAll(), b.getAttribute("data-card-edit"))); };
+  });
+  C.querySelectorAll("[data-card-del]").forEach(function(b){
+    b.onclick = function(){ delRow("cards", b.getAttribute("data-card-del")); };
+  });
+  C.querySelectorAll("[data-card-page]").forEach(function(b){
+    b.onclick = function(){ cardsPage = Number(b.getAttribute("data-card-page")); drawCardsBody(); };
+  });
+}
+function bindCards(){
+  var add = C.querySelector("[data-card-add]");
+  if (add) add.onclick = function(){ openForm("cards", null, { date: ymd(seoulNow()), category: "기타" }); };
+  var se = C.querySelector("[data-card-search]");
+  if (se) se.oninput = function(){ cardsQ = se.value; cardsPage = 1; drawCardsBody(); };
+  bindCardsBody();
+}
+
+/* ---- AI 구독 요약 (지출 관점 — 상세 관리는 #subs 화면) ---- */
+function subsSummarySection(){
+  var list = (state.data.subs)||[];
+  var today = new Date(); today.setHours(0,0,0,0);
+  var mKrw = 0, mUsd = 0;
+  var rows = list.map(function(s){
+    var monthly = (Number(s.amount)||0) / (s.cycle === "연간" ? 12 : 1);
+    if (s.currency === "달러") mUsd += monthly; else mKrw += monthly;
+    var next = subNextRenewal(s.renew_date, s.cycle, today);
+    return { s: s, next: next, monthly: monthly };
+  }).sort(function(a,b){
+    if (a.next && b.next) return a.next - b.next;
+    return a.next ? -1 : (b.next ? 1 : 0);
+  });
+  fxRefresh();
+  var rate = fxRate();
+  var totalKrw = Math.round(mKrw + mUsd * rate);
+  var near = null;
+  for (var i=0;i<rows.length;i++){ if (rows[i].next){ near = rows[i]; break; } }
+  var nearHtml = "—";
+  if (near){
+    var nd = ddayInfo(subFmtDate(near.next), today, false);
+    nearHtml = esc(near.s.name||"")+" <span class='dday "+nd.cls+" tnum' style='display:inline-block;margin-left:4px'>"+nd.txt+"</span>";
+  }
+  var aiCardKrw = cardsMonthSum(ymKey(seoulNow()), "AI구독");
+  var chips = "<div class='sum-chip'>월 합계 (원화 환산)<b class='tnum'>"+moneyMan(totalKrw)+"</b></div>"+
+    "<div class='sum-chip'>구독 개수<b class='tnum'>"+list.length+"개</b></div>"+
+    "<div class='sum-chip'>가장 임박한 갱신<b>"+nearHtml+"</b></div>"+
+    "<div class='sum-chip'>법인카드 AI구독 (이번 달)<b class='tnum'>"+moneyMan(aiCardKrw)+"</b></div>";
+  var h = "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>월 고정 지출</div><h3>AI 구독</h3>"+
+      "<div class='sec-note' style='margin-top:4px'>연간 결제는 12개월로 나눠 환산 · 달러 구독은 환율 1$ ≈ "+comma(Math.round(rate))+"원 기준. "+
+      "구독 등록 합계와 ‘법인카드 AI구독’ 결제액을 견줘 누락·중복 결제를 확인하세요.</div></div>"+
+      "<button class='btn sm' data-subs-go>AI 구독관리 →</button></div>"+
+    "<div class='sum-strip'>"+chips+"</div><div class='tbl-scroll'>";
+  if (!rows.length){
+    h += "<div class='empty'>등록된 구독이 없습니다. ‘AI 구독관리 →’에서 ChatGPT·Claude 같은 서비스를 등록하세요.</div>";
+  } else {
+    h += "<table><thead><tr><th>서비스</th><th>플랜</th><th class='r'>금액</th><th>주기</th><th>다음 갱신</th><th class='r'>월 환산(원화)</th></tr></thead><tbody>";
+    rows.forEach(function(r){
+      var s = r.s;
+      var di = r.next ? ddayInfo(subFmtDate(r.next), today, false) : { cls:"far", txt:"—" };
+      var monthlyKrw = Math.round(s.currency==="달러" ? r.monthly*rate : r.monthly);
+      h += "<tr><td style='font-weight:700'>"+esc(s.name||"")+"</td>"+
+        "<td style='color:var(--ink-2)'>"+esc(s.plan||"")+"</td>"+
+        "<td class='r tnum'>"+subMoney(s.amount, s.currency)+"</td>"+
+        "<td>"+esc(s.cycle||"월간")+"</td>"+
+        "<td class='tnum'>"+(r.next
+          ? esc(subFmtDate(r.next))+" <span class='dday "+di.cls+" tnum' style='display:inline-block;margin-left:6px'>"+di.txt+"</span>"
+          : "<span style='color:var(--ink-3)'>미정</span>")+"</td>"+
+        "<td class='r tnum'>"+moneyWon(monthlyKrw)+
+          (s.currency==="달러" ? "<div style='font-size:11px;color:var(--ink-3)'>$"+(r.monthly%1 ? r.monthly.toFixed(2) : comma(r.monthly))+"</div>" : "")+"</td></tr>";
+    });
+    h += "</tbody><tfoot><tr><td colspan='5' style='font-weight:700'>월 합계 (원화 환산)</td>"+
+      "<td class='r tnum'>"+moneyWon(totalKrw)+"</td></tr></tfoot></table>";
+  }
+  h += "</div></section>";
+  return h;
+}
+
+/* ---- 이번 달 총 지출 = 고정경비 + 법인카드 + 개별지출 ----
+   세 값은 서로 다른 테이블(fixedcost / cards / expense)에서만 뽑으므로 겹치지 않는다.
+   AI 구독료는 법인카드 결제분에 이미 포함되어 있어 따로 더하지 않는다. */
+function expenseTotalSection(){
+  var now = seoulNow(), curY = now.getFullYear(), curM = now.getMonth()+1, curYm = ymKey(now);
+  var fixedThis = (state.data.fixedcost||[]).reduce(function(a,r){
+    return a + (Number(r.year)===curY ? (Number(r["m"+curM])||0) : 0);
+  }, 0);
+  var cardThis = cardsMonthSum(curYm);
+  var expThis = (state.data.expense||[]).reduce(function(a,x){
+    return a + (String(x.date||"").slice(0,7)===curYm ? (Number(x.amount)||0) : 0);
+  }, 0);
+  var total = fixedThis + cardThis + expThis;
+  return "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>"+curY+"년 "+curM+"월 총 지출</div>"+
+      "<h3>"+moneyWon(total)+"</h3>"+
+      "<div class='sec-note' style='margin-top:4px'>고정경비 "+comma(fixedThis)+"원 + 법인카드 "+comma(cardThis)+"원 + 개별지출 "+comma(expThis)+"원 · "+
+      "세 항목은 각각 다른 표에 기록되어 중복 합산되지 않습니다. AI 구독료는 법인카드 결제분에 포함되어 따로 더하지 않습니다.</div></div>"+
+    "<div class='sum-strip' style='padding:0'>"+
+      "<div class='sum-chip'>고정경비<b class='tnum'>"+moneyMan(fixedThis)+"</b></div>"+
+      "<div class='sum-chip'>법인카드<b class='tnum'>"+moneyMan(cardThis)+"</b></div>"+
+      "<div class='sum-chip'>개별지출<b class='tnum'>"+moneyMan(expThis)+"</b></div></div>"+
+    "</div></section>";
+}
 function renderExpenses(){
   var d = state.data, list = (d.expense||[]).slice().sort(function(a,b){ return String(b.date||"").localeCompare(String(a.date||"")); });
   var sum = list.reduce(function(a,x){return a+(Number(x.amount)||0);},0);
   var byCat = {};
   list.forEach(function(x){ var c=x.category||"기타"; byCat[c]=(byCat[c]||0)+(Number(x.amount)||0); });
   var html = pageHead("expenses","", "<button class='btn primary' data-add>+ 지출 추가</button>");
+  html += expenseTotalSection();
   html += fixedCostSection();
+  html += cardsSection();
+  html += subsSummarySection();
   var chips = "<div class='sum-chip'>전체 지출<b class='tnum'>"+moneyMan(sum)+"</b></div>";
   Object.keys(byCat).sort(function(a,b){return byCat[b]-byCat[a];}).forEach(function(c){ chips += "<div class='sum-chip'>"+esc(c)+"<b class='tnum'>"+moneyMan(byCat[c])+"</b></div>"; });
   html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>개별 지출</div><h3>단건 지출 내역</h3></div></div><div class='sum-strip'>"+chips+"</div><div class='tbl-scroll'>";
@@ -3691,6 +3891,9 @@ function renderExpenses(){
   C.innerHTML = html;
   C.querySelector("[data-add]").onclick = function(){ openForm("expense", null); };
   bindFixedCost();
+  bindCards();
+  var sgo = C.querySelector("[data-subs-go]");
+  if (sgo) sgo.onclick = function(){ location.hash = "#subs"; };
   bindRowActions(C, "expense", d.expense);
   applyMask();
 }
