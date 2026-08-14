@@ -593,6 +593,9 @@
   .fc-pay{display:inline-block; margin-left:6px; font-size:10.5px; font-weight:600; color:var(--accent-ink);
     background:var(--accent-soft,rgba(80,150,120,.14)); border-radius:5px; padding:1px 6px; vertical-align:middle;}
   .fc-dash{color:var(--ink-4,#667);}
+  .fc-share{font-size:11.5px; font-weight:700; color:var(--accent-ink);}
+  .fc-share.full{font-weight:600; color:var(--ink-4,#667);}
+  .fc-bill{display:block; margin-top:2px; font-size:10.5px; font-weight:600; color:var(--ink-4,#667);}
   .fc-rowtot{font-weight:700;}
   .fc-table .fc-cur{background:var(--accent-soft,rgba(80,150,120,.12));}
   .fc-table tfoot .fc-total td{font-weight:800; border-top:2px solid var(--line-strong); background:var(--surface-2,var(--surface));}
@@ -804,6 +807,12 @@
 .hp-bar-track{flex:1;height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden}
 .hp-bar-fill{display:block;height:100%;border-radius:4px;background:var(--accent)}
 .hp-bar-count{flex:0 0 48px;text-align:right;font-size:12.5px;color:var(--ink-2)}
+/* 카드사용내역: 분류별·카드별 집계 (막대는 hp-bars 재사용) */
+.ch-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:16px 20px 20px}
+.ch-grid.one{grid-template-columns:1fr}
+@media(max-width:860px){.ch-grid{grid-template-columns:1fr}}
+.ch-bar-val{flex:0 0 175px;text-align:right;font-size:12.5px;color:var(--ink-3)}
+.ch-bar-val b{color:var(--ink);font-weight:800}
 .kpis.hp5{grid-template-columns:repeat(5,1fr);}
   @media (max-width:1100px){ .kpis.hp5{grid-template-columns:repeat(2,1fr);} }
   @media (max-width:460px){ .kpis.hp5{grid-template-columns:1fr;} }
@@ -1574,7 +1583,7 @@ var MENU = [
      메뉴 순서가 일하는 순서와 같아야 어디를 봐야 할지 생각하지 않게 된다. */
   { cap:"영업", items:[ ["inquiries","📨","의뢰관리",0], ["clients","🤝","고객관리",0], ["projects","🎬","프로젝트관리",0], ["homepage","🌐","홈페이지",0] ] },
   { cap:"재무", items:[ ["revenue","💰","매출관리",0], ["deposits","🏦","입금관리",0], ["expenses","🧾","지출관리",0], ["profit","📈","영업이익분석",0], ["subs","🔁","AI 구독관리",0],
-      ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",1] ] },
+      ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",0] ] },
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
   { cap:"커뮤니케이션", items:[ ["namecard","🪪","명함관리",1], ["newsletter","📰","뉴스레터",1] ] },
   { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["festivals","🎥","AI 영화제",0], ["gov","🏛️","AI 지원사업",0], ["newsrep","📰","뉴스리포트",0], ["youtube","▶️","AI 유튜브",0], ["library","📚","자료실",0], ["reports","📑","리포트",0] ] },
@@ -2068,9 +2077,10 @@ var FIELDS = {
     ["m1","1월","number"],["m2","2월","number"],["m3","3월","number"],["m4","4월","number"],
     ["m5","5월","number"],["m6","6월","number"],["m7","7월","number"],["m8","8월","number"],
     ["m9","9월","number"],["m10","10월","number"],["m11","11월","number"],["m12","12월","number"],
+    ["share","부담률(%) — 비우면 100","number"],
     ["note","메모","text"] ]
 };
-var NUMS = { amount:1, contract_amount:1, progress:1, year:1, payday:1,
+var NUMS = { amount:1, contract_amount:1, progress:1, year:1, payday:1, share:1,
   m1:1,m2:1,m3:1,m4:1,m5:1,m6:1,m7:1,m8:1,m9:1,m10:1,m11:1,m12:1 };
 var BOOLS = { done:1, all_day:1 };
 
@@ -3627,6 +3637,10 @@ function renderDeposits(){
 /* 고정경비(공동경비) 월별 매트릭스 — 임대료·정수기·인터넷·전기 등 매월 반복 지출 */
 var fixedYear = null;
 var FC_ORDER = ["임대료","정수기","인터넷","기타","기타 (이사)","전기(지하)","전기(3층)"];
+/* 부담률(share, %) — 사무실을 두 회사가 나눠 쓰는 등 청구액 전액을 우리가 내지 않는 항목이 있다.
+   비어 있거나 0이면 100(전액 부담)으로 본다. 화면·합계는 모두 부담률을 적용한 실지출 기준. */
+function fcShare(row){ var s = Number(row && row.share); return (!s || s <= 0) ? 100 : s; }
+function fcMonthVal(row, m){ return Math.round((Number(row["m"+m])||0) * fcShare(row) / 100); }
 function fixedCostSection(){
   var all = (state.data.fixedcost||[]);
   var years = {};
@@ -3641,32 +3655,44 @@ function fixedCostSection(){
     .sort(function(a,b){ var ia=FC_ORDER.indexOf(a.category), ib=FC_ORDER.indexOf(b.category); return (ia<0?99:ia)-(ib<0?99:ib); });
   var MK = ["m1","m2","m3","m4","m5","m6","m7","m8","m9","m10","m11","m12"];
   var mTot = [0,0,0,0,0,0,0,0,0,0,0,0], grand = 0;
-  rows.forEach(function(r){ MK.forEach(function(mk,i){ var v=Number(r[mk])||0; mTot[i]+=v; grand+=v; }); });
+  rows.forEach(function(r){ MK.forEach(function(mk,i){ var v=fcMonthVal(r,i+1); mTot[i]+=v; grand+=v; }); });
   var thisMonth = (fixedYear===curY) ? mTot[curM-1] : 0;
   var yChips = yearList.map(function(y){ return "<button class='proj-chip"+(y===fixedYear?" on":"")+"' data-fy='"+y+"'>"+y+"년</button>"; }).join("");
   var mh = ""; for (var mi=1; mi<=12; mi++) mh += "<th class='r"+(fixedYear===curY&&mi===curM?" fc-cur":"")+"'>"+mi+"월</th>";
   var body = "";
   rows.forEach(function(r){
-    var rt=0, cells="";
-    MK.forEach(function(mk,i){ var v=Number(r[mk])||0; rt+=v; var cur=(fixedYear===curY&&(i+1)===curM);
-      cells += "<td class='r tnum"+(cur?" fc-cur":"")+"'>"+(v?comma(v):"<span class='fc-dash'>–</span>")+"</td>"; });
+    var sh = fcShare(r), partial = (sh !== 100);
+    var rt=0, billTot=0, cells="";
+    MK.forEach(function(mk,i){
+      var bill = Number(r[mk])||0, v = fcMonthVal(r, i+1);
+      rt += v; billTot += bill;
+      var cur=(fixedYear===curY&&(i+1)===curM);
+      var tip = (partial && bill) ? " data-tip=\"<b>"+esc(r.category||"")+" "+(i+1)+"월</b>"+
+        "<div class=&#39;tt-row&#39;><span>청구액</span><span>"+comma(bill)+"원</span></div>"+
+        "<div class=&#39;tt-row&#39;><span>부담률</span><span>"+sh+"%</span></div>"+
+        "<div class=&#39;tt-row&#39;><span>우리 부담</span><span>"+comma(v)+"원</span></div>\"" : "";
+      cells += "<td class='r tnum"+(cur?" fc-cur":"")+"'"+tip+">"+(v?comma(v):"<span class='fc-dash'>–</span>")+"</td>"; });
     var pay = (Number(r.payday)>0) ? "<span class='fc-pay'>매월 "+r.payday+"일</span>" : "";
-    body += "<tr><td class='fc-cat'>"+esc(r.category||"")+pay+"</td>"+cells+
-      "<td class='r tnum fc-rowtot'>"+comma(rt)+"</td>"+
+    var shCell = "<td class='r fc-share"+(partial?"":" full")+"'>"+sh+"%</td>";
+    body += "<tr><td class='fc-cat'>"+esc(r.category||"")+pay+"</td>"+shCell+cells+
+      "<td class='r tnum fc-rowtot'>"+comma(rt)+
+        ((partial&&billTot)?"<span class='fc-bill'>청구 "+comma(billTot)+"</span>":"")+"</td>"+
       "<td class='r'><div class='row-actions'><button class='icon-btn' data-fc-edit='"+r.id+"'>✎</button><button class='icon-btn del' data-fc-del='"+r.id+"'>🗑</button></div></td></tr>";
   });
-  var tRow = "<tr class='fc-total'><td>월 합계</td>";
+  var tRow = "<tr class='fc-total'><td colspan='2'>월 합계</td>";
   mTot.forEach(function(t,i){ var cur=(fixedYear===curY&&(i+1)===curM); tRow += "<td class='r tnum"+(cur?" fc-cur":"")+"'>"+(t?comma(t):"–")+"</td>"; });
   tRow += "<td class='r tnum'>"+comma(grand)+"</td><td></td></tr>";
   var h = "<section class='panel'>"+
-    "<div class='sec-head'><div><div class='eyebrow'>고정경비 · 공동경비</div><h3>월별 고정비 ("+fixedYear+"년)</h3></div>"+
+    "<div class='sec-head'><div><div class='eyebrow'>고정경비 · 공동경비</div><h3>월별 고정비 ("+fixedYear+"년)</h3>"+
+      "<div class='sec-note' style='margin-top:4px'>표의 모든 금액은 부담률을 적용한 <b>우리 회사 실지출</b> 기준입니다. "+
+      "부담률이 100%가 아닌 항목은 셀에 마우스를 올리면 청구액 전액을 볼 수 있고, 연간 칸 아래에도 청구액을 함께 적었습니다.</div></div>"+
     "<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>"+
-      (fixedYear===curY?"<div class='sum-chip'>이번 달("+curM+"월)<b class='tnum'>"+moneyMan(thisMonth)+"</b></div>":"")+
-      "<div class='sum-chip'>연간 합계<b class='tnum'>"+moneyMan(grand)+"</b></div>"+
+      (fixedYear===curY?"<div class='sum-chip'>이번 달("+curM+"월) 부담분<b class='tnum'>"+moneyMan(thisMonth)+"</b></div>":"")+
+      "<div class='sum-chip'>연간 합계(부담분)<b class='tnum'>"+moneyMan(grand)+"</b></div>"+
       "<button class='btn sm' data-fc-add>+ 항목</button></div></div>"+
     "<div class='proj-chips' style='margin-bottom:10px'>"+yChips+"</div><div class='tbl-scroll'>";
   if (!rows.length) h += "<div class='empty'>"+fixedYear+"년 고정경비 항목이 없습니다. ‘+ 항목’으로 추가하세요.</div>";
-  else h += "<table class='fc-table'><thead><tr><th>항목</th>"+mh+"<th class='r'>연간</th><th class='r'>관리</th></tr></thead><tbody>"+body+"</tbody><tfoot>"+tRow+"</tfoot></table>";
+  else h += "<table class='fc-table'><thead><tr><th>항목</th><th class='r'>부담률</th>"+mh+"<th class='r'>연간</th><th class='r'>관리</th></tr></thead><tbody>"+body+"</tbody><tfoot>"+tRow+"</tfoot></table>";
   h += "</div></section>";
   return h;
 }
@@ -3699,24 +3725,18 @@ function cardSrcBadge(src){
   var cls = s==="문자" ? "image" : (s==="명세서" ? "file" : "gray");
   return "<span class='att-badge "+cls+"'>"+esc(s)+"</span>";
 }
-function cardsBodyHtml(){
-  var q = cardsQ.trim().toLowerCase();
-  var list = cardsSorted().filter(function(x){
-    if (!q) return true;
-    var hay = (String(x.merchant||"")+" "+String(x.card||"")+" "+String(x.category||"")).toLowerCase();
-    return hay.indexOf(q) >= 0;
-  });
+/* 카드 내역 표 — 지출관리(요약)와 카드사용내역(전용 화면)이 함께 쓴다.
+   pfx 로 행·페이지 버튼의 data 속성 이름만 화면별로 바꾼다("card" / "ch"). */
+function cardsClampPage(page, total, per){
+  var pages = Math.max(1, Math.ceil(total / per));
+  return Math.min(Math.max(1, Number(page)||1), pages);
+}
+function cardsTableHtml(list, page, per, pfx, emptyMsg, sumLabel){
   var total = list.length;
-  if (!total){
-    return "<div class='empty'>"+(q
-      ? "검색 결과가 없습니다."
-      : "법인카드 내역이 없습니다. 카드 승인 문자와 카드사 명세서가 들어오면 이 표에 자동으로 쌓이고, ‘+ 카드결제 추가’로 직접 넣을 수도 있습니다.")+"</div>";
-  }
-  var pages = Math.max(1, Math.ceil(total / CARDS_PER));
-  if (cardsPage > pages) cardsPage = pages;
-  if (cardsPage < 1) cardsPage = 1;
-  var start = (cardsPage-1) * CARDS_PER;
-  var items = list.slice(start, start + CARDS_PER);
+  if (!total) return "<div class='empty'>"+emptyMsg+"</div>";
+  var pages = Math.max(1, Math.ceil(total / per));
+  var start = (page-1) * per;
+  var items = list.slice(start, start + per);
   var listSum = list.reduce(function(a,x){ return a+(Number(x.amount)||0); }, 0);
   var h = "<div class='tbl-scroll'><table><thead><tr><th>날짜</th><th>카드</th><th>가맹점</th><th>분류</th>"+
     "<th class='r'>금액</th><th>출처</th><th class='r'>관리</th></tr></thead><tbody>";
@@ -3727,22 +3747,35 @@ function cardsBodyHtml(){
       "<td><span class='mini-tag vfx'>"+esc(x.category||"기타")+"</span></td>"+
       "<td class='r tnum'>"+moneyWon(x.amount)+"</td>"+
       "<td>"+cardSrcBadge(x.src)+"</td>"+
-      "<td class='r'><div class='row-actions'><button class='icon-btn' data-card-edit='"+esc(x.id)+"'>✎</button>"+
-        "<button class='icon-btn del' data-card-del='"+esc(x.id)+"'>🗑</button></div></td></tr>";
+      "<td class='r'><div class='row-actions'><button class='icon-btn' data-"+pfx+"-edit='"+esc(x.id)+"'>✎</button>"+
+        "<button class='icon-btn del' data-"+pfx+"-del='"+esc(x.id)+"'>🗑</button></div></td></tr>";
   });
-  h += "</tbody><tfoot><tr><td colspan='4' style='font-weight:700'>"+(q?"검색 합계":"전체 합계")+" ("+total+"건)</td>"+
+  h += "</tbody><tfoot><tr><td colspan='4' style='font-weight:700'>"+sumLabel+" ("+total+"건)</td>"+
     "<td class='r tnum'>"+moneyWon(listSum)+"</td><td colspan='2'></td></tr></tfoot></table></div>";
   if (pages > 1){
-    var from = Math.max(1, cardsPage - 2);
+    var from = Math.max(1, page - 2);
     var to = Math.min(pages, from + 4);
     from = Math.max(1, to - 4);
-    h += "<div class='proj-chips bd-pager'><button class='proj-chip' data-card-page='1'>« 처음</button>";
+    h += "<div class='proj-chips bd-pager'><button class='proj-chip' data-"+pfx+"-page='1'>« 처음</button>";
     for (var pn = from; pn <= to; pn++){
-      h += "<button class='proj-chip"+(pn===cardsPage?" on":"")+"' data-card-page='"+pn+"'>"+pn+"</button>";
+      h += "<button class='proj-chip"+(pn===page?" on":"")+"' data-"+pfx+"-page='"+pn+"'>"+pn+"</button>";
     }
-    h += "<button class='proj-chip' data-card-page='"+pages+"'>끝 »</button></div>";
+    h += "<button class='proj-chip' data-"+pfx+"-page='"+pages+"'>끝 »</button></div>";
   }
   return h;
+}
+function cardsBodyHtml(){
+  var q = cardsQ.trim().toLowerCase();
+  var list = cardsSorted().filter(function(x){
+    if (!q) return true;
+    var hay = (String(x.merchant||"")+" "+String(x.card||"")+" "+String(x.category||"")).toLowerCase();
+    return hay.indexOf(q) >= 0;
+  });
+  cardsPage = cardsClampPage(cardsPage, list.length, CARDS_PER);
+  return cardsTableHtml(list, cardsPage, CARDS_PER, "card",
+    (q ? "검색 결과가 없습니다."
+       : "법인카드 내역이 없습니다. 카드 승인 문자와 카드사 명세서가 들어오면 이 표에 자동으로 쌓이고, ‘+ 카드결제 추가’로 직접 넣을 수도 있습니다."),
+    (q ? "검색 합계" : "전체 합계"));
 }
 function cardsSection(){
   var now = seoulNow();
@@ -3783,6 +3816,203 @@ function bindCards(){
   var se = C.querySelector("[data-card-search]");
   if (se) se.oninput = function(){ cardsQ = se.value; cardsPage = 1; drawCardsBody(); };
   bindCardsBody();
+}
+
+/* ============ 카드사용내역 (법인카드 전용 관리 화면) ============ */
+/* 지출관리의 cardsQ/cardsPage 와 공유하지 않는 별도 상태 — 두 화면이 서로 간섭하지 않는다. */
+var chQ = "", chPage = 1, chMonth = "", chCat = "전체";
+var CH_PER = 25;
+
+function chCatOf(x){ return String(x.category||"").trim() || "기타"; }
+function chCardOf(x){ return String(x.card||"").trim() || "미지정"; }
+/* 데이터에 존재하는 YYYY-MM — 최신순 */
+function chMonths(){
+  var seen = {}, out = [];
+  cardsAll().forEach(function(x){
+    var m = String(x.date||"").slice(0,7);
+    if (m.length === 7 && !seen[m]){ seen[m] = 1; out.push(m); }
+  });
+  return out.sort(function(a,b){ return b.localeCompare(a); });
+}
+/* 선택된 월 — 아직 고르지 않았으면 이번 달(이번 달 데이터가 없으면 전체) */
+function chActiveMonth(){
+  if (chMonth) return chMonth;
+  var cur = ymKey(seoulNow());
+  return chMonths().indexOf(cur) >= 0 ? cur : "전체";
+}
+function chMonthLabel(ym){
+  return ym === "전체" ? "전체 기간" : (ym.slice(0,4)+"년 "+Number(ym.slice(5,7))+"월");
+}
+/* 월 필터만 적용 — 분류 칩·집계의 기준 */
+function chMonthList(){
+  var ym = chActiveMonth();
+  if (ym === "전체") return cardsSorted();
+  return cardsSorted().filter(function(x){ return String(x.date||"").slice(0,7) === ym; });
+}
+/* 월 + 분류 + 검색을 모두 적용 — 상세 표의 기준 */
+function chFiltered(){
+  var q = chQ.trim().toLowerCase();
+  return chMonthList().filter(function(x){
+    if (chCat !== "전체" && chCatOf(x) !== chCat) return false;
+    if (!q) return true;
+    var hay = (String(x.merchant||"")+" "+String(x.card||"")+" "+String(x.category||"")+" "+String(x.memo||"")).toLowerCase();
+    return hay.indexOf(q) >= 0;
+  });
+}
+/* keyOf 기준으로 건수·금액 묶기 (금액 큰 순) */
+function chGroup(list, keyOf){
+  var map = {}, out = [];
+  list.forEach(function(x){
+    var k = keyOf(x);
+    if (!map[k]){ map[k] = { key:k, n:0, sum:0 }; out.push(map[k]); }
+    map[k].n++;
+    map[k].sum += (Number(x.amount)||0);
+  });
+  return out.sort(function(a,b){ return b.sum - a.sum; });
+}
+function chBarsHtml(rows, total){
+  if (!rows.length) return "<div class='empty'>해당 기간에 내역이 없습니다.</div>";
+  var max = rows.reduce(function(a,r){ return Math.max(a, r.sum); }, 0) || 1;
+  return "<div class='hp-bars'>"+rows.map(function(r){
+    var w = Math.max(4, Math.round(r.sum / max * 100));
+    var pct = total > 0 ? Math.round(r.sum / total * 1000) / 10 : 0;
+    return "<div class='hp-bar-row'><span class='hp-bar-label'>"+esc(r.key)+"</span>"+
+      "<span class='hp-bar-track'><span class='hp-bar-fill' style='width:"+w+"%'></span></span>"+
+      "<span class='ch-bar-val tnum'>"+comma(r.n)+"건 · <b>"+moneyWon(r.sum)+"</b> · "+pct+"%</span></div>";
+  }).join("")+"</div>";
+}
+function chFiltersHtml(){
+  var ym = chActiveMonth();
+  var months = chMonths().slice(0, 12);
+  var h = "<div class='proj-chips' style='margin-bottom:12px'>"+
+    "<button class='proj-chip"+(ym==="전체"?" on":"")+"' data-ch-month='전체'>전체</button>";
+  months.forEach(function(m){
+    h += "<button class='proj-chip"+(m===ym?" on":"")+"' data-ch-month='"+m+"'>"+esc(m.slice(0,4)+"."+m.slice(5,7))+"</button>";
+  });
+  h += "</div>";
+  var mList = chMonthList();
+  var cats = chGroup(mList, chCatOf);
+  var has = false;
+  cats.forEach(function(c){ if (c.key === chCat) has = true; });
+  if (chCat !== "전체" && !has) chCat = "전체";
+  h += "<div class='proj-chips'>"+
+    "<button class='proj-chip"+(chCat==="전체"?" on":"")+"' data-ch-cat='전체'>전체<span class='chip-n'>"+comma(mList.length)+"</span></button>";
+  cats.forEach(function(c){
+    h += "<button class='proj-chip"+(c.key===chCat?" on":"")+"' data-ch-cat='"+esc(c.key)+"'>"+esc(c.key)+"<span class='chip-n'>"+comma(c.n)+"</span></button>";
+  });
+  return h+"</div>";
+}
+function chAggrHtml(){
+  var list = chMonthList();
+  var total = list.reduce(function(a,x){ return a+(Number(x.amount)||0); }, 0);
+  var byCat = chGroup(list, chCatOf);
+  var byCard = chGroup(list, chCardOf);
+  var one = byCard.length <= 1;   /* 카드가 1종이면 카드별 집계는 의미가 없어 생략 */
+  var h = "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>집계</div><h3>"+esc(chMonthLabel(chActiveMonth()))+"</h3></div>"+
+      "<div class='sec-note'>합계 "+moneyWon(total)+" · "+comma(list.length)+"건</div></div>"+
+    "<div class='ch-grid"+(one?" one":"")+"'>"+
+      "<div><div class='eyebrow' style='margin-bottom:10px'>분류별</div>"+chBarsHtml(byCat, total)+"</div>";
+  if (!one) h += "<div><div class='eyebrow' style='margin-bottom:10px'>카드별</div>"+chBarsHtml(byCard, total)+"</div>";
+  return h+"</div></section>";
+}
+function chTableHtml(){
+  var list = chFiltered();
+  chPage = cardsClampPage(chPage, list.length, CH_PER);
+  var empty = cardsAll().length
+    ? "이 조건에 맞는 내역이 없습니다. 월·분류·검색 조건을 바꿔보세요."
+    : "법인카드 내역이 없습니다. 카드 승인 문자와 카드사 명세서가 들어오면 이 표에 자동으로 쌓이고, ‘+ 카드결제 추가’로 직접 넣을 수도 있습니다.";
+  return cardsTableHtml(list, chPage, CH_PER, "ch", empty, "필터 합계");
+}
+function drawChFilters(){
+  var box = C.querySelector("[data-ch-filters]");
+  if (!box) return;
+  box.innerHTML = chFiltersHtml();
+  bindChFilters();
+}
+function drawChAggr(){
+  var box = C.querySelector("[data-ch-aggr]");
+  if (!box) return;
+  box.innerHTML = chAggrHtml();
+  applyMask();
+}
+function drawChTable(){
+  var box = C.querySelector("[data-ch-table]");
+  if (!box) return;
+  box.innerHTML = chTableHtml();
+  bindChTable();
+  applyMask();
+}
+function bindChFilters(){
+  C.querySelectorAll("[data-ch-month]").forEach(function(b){
+    b.onclick = function(){
+      chMonth = b.getAttribute("data-ch-month");
+      chCat = "전체"; chPage = 1;
+      drawChFilters(); drawChAggr(); drawChTable();
+    };
+  });
+  C.querySelectorAll("[data-ch-cat]").forEach(function(b){
+    b.onclick = function(){
+      chCat = b.getAttribute("data-ch-cat");
+      chPage = 1;
+      drawChFilters(); drawChTable();
+    };
+  });
+}
+function bindChTable(){
+  C.querySelectorAll("[data-ch-edit]").forEach(function(b){
+    b.onclick = function(){ openForm("cards", findById(cardsAll(), b.getAttribute("data-ch-edit"))); };
+  });
+  C.querySelectorAll("[data-ch-del]").forEach(function(b){
+    b.onclick = function(){ delRow("cards", b.getAttribute("data-ch-del")); };
+  });
+  C.querySelectorAll("[data-ch-page]").forEach(function(b){
+    b.onclick = function(){ chPage = Number(b.getAttribute("data-ch-page")); drawChTable(); };
+  });
+}
+function renderCardHist(){
+  var now = seoulNow();
+  var curYm = ymKey(now);
+  var prevYm = ymKey(new Date(now.getFullYear(), now.getMonth()-1, 1));
+  var all = cardsAll();
+  var curSum = cardsMonthSum(curYm), prevSum = cardsMonthSum(prevYm);
+  var curCnt = all.filter(function(x){ return String(x.date||"").slice(0,7) === curYm; }).length;
+  var chips = "<div class='sum-chip'>이번 달 사용액<b class='tnum'>"+moneyWon(curSum)+"</b></div>"+
+    "<div class='sum-chip'>지난 달 사용액<b class='tnum'>"+moneyWon(prevSum)+"</b></div>"+
+    "<div class='sum-chip'>이번 달 건수<b class='tnum'>"+comma(curCnt)+"건</b></div>"+
+    "<div class='sum-chip'>전체 건수<b class='tnum'>"+comma(all.length)+"건</b></div>";
+  if (prevSum > 0){
+    var up = curSum >= prevSum;
+    var pct = Math.round(Math.abs(curSum - prevSum) / prevSum * 100);
+    chips += "<div class='sum-chip'>지난 달 대비<b class='tnum' style='color:var("+(up?"--urgent":"--pos")+")'>"+
+      (up?"▲ ":"▼ ")+pct+"%</b></div>";
+  }
+  var html = pageHead("cardhist",
+    "카드 승인 문자와 카드사 명세서가 자동으로 쌓이는 법인카드 전용 화면입니다. 빠진 결제는 ‘+ 카드결제 추가’로 직접 넣을 수 있습니다.",
+    "<button class='btn ghost' data-ch-toexp>지출관리 →</button>"+
+    "<button class='btn primary' data-ch-add>+ 카드결제 추가</button>");
+  html += "<section class='panel'><div class='sum-strip' style='padding-bottom:16px'>"+chips+"</div></section>";
+  html += "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>필터</div><h3>기간 · 분류 · 검색</h3></div></div>"+
+    "<div style='padding:0 20px 18px'>"+
+      "<div class='ct-controls' style='margin-bottom:14px'>"+
+        "<input class='proj-search' type='text' placeholder='가맹점·카드·분류·메모 검색' data-ch-search value='"+esc(chQ)+"'></div>"+
+      "<div data-ch-filters>"+chFiltersHtml()+"</div>"+
+    "</div></section>";
+  html += "<div data-ch-aggr>"+chAggrHtml()+"</div>";
+  html += "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>상세 내역</div><h3>카드 사용 내역</h3></div>"+
+      "<div class='sec-note'>한 페이지 "+CH_PER+"건</div></div>"+
+    "<div data-ch-table>"+chTableHtml()+"</div></section>";
+  C.innerHTML = html;
+  var add = C.querySelector("[data-ch-add]");
+  if (add) add.onclick = function(){ openForm("cards", null, { date: ymd(seoulNow()), category: "기타" }); };
+  var go = C.querySelector("[data-ch-toexp]");
+  if (go) go.onclick = function(){ location.hash = "#expenses"; };
+  var se = C.querySelector("[data-ch-search]");
+  if (se) se.oninput = function(){ chQ = se.value; chPage = 1; drawChTable(); };
+  bindChFilters();
+  bindChTable();
 }
 
 /* ---- AI 구독 요약 (지출 관점 — 상세 관리는 #subs 화면) ---- */
@@ -3851,7 +4081,7 @@ function subsSummarySection(){
 function expenseTotalSection(){
   var now = seoulNow(), curY = now.getFullYear(), curM = now.getMonth()+1, curYm = ymKey(now);
   var fixedThis = (state.data.fixedcost||[]).reduce(function(a,r){
-    return a + (Number(r.year)===curY ? (Number(r["m"+curM])||0) : 0);
+    return a + (Number(r.year)===curY ? fcMonthVal(r, curM) : 0);
   }, 0);
   var cardThis = cardsMonthSum(curYm);
   var expThis = (state.data.expense||[]).reduce(function(a,x){
@@ -3861,7 +4091,7 @@ function expenseTotalSection(){
   return "<section class='panel'>"+
     "<div class='sec-head'><div><div class='eyebrow'>"+curY+"년 "+curM+"월 총 지출</div>"+
       "<h3>"+moneyWon(total)+"</h3>"+
-      "<div class='sec-note' style='margin-top:4px'>고정경비 "+comma(fixedThis)+"원 + 법인카드 "+comma(cardThis)+"원 + 개별지출 "+comma(expThis)+"원 · "+
+      "<div class='sec-note' style='margin-top:4px'>고정경비(부담분) "+comma(fixedThis)+"원 + 법인카드 "+comma(cardThis)+"원 + 개별지출 "+comma(expThis)+"원 · "+
       "세 항목은 각각 다른 표에 기록되어 중복 합산되지 않습니다. AI 구독료는 법인카드 결제분에 포함되어 따로 더하지 않습니다.</div></div>"+
     "<div class='sum-strip' style='padding:0'>"+
       "<div class='sum-chip'>고정경비<b class='tnum'>"+moneyMan(fixedThis)+"</b></div>"+
@@ -6301,7 +6531,7 @@ var ROUTES = {
   inquiries:function(){ renderMailView("inquiries"); }, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
   newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov,
-  subs:renderSubs, library:renderLibrary, homepage:renderHomepage
+  subs:renderSubs, library:renderLibrary, homepage:renderHomepage, cardhist:renderCardHist
 };
 /* 마스터 키 오류 화면 — 금고(config/portal)의 키를 수신부(GAS)가 거부했을 때.
    키 수동 입력 게이트는 제거됨 — 어드민만 여기서 새 키를 금고에 재등록할 수 있다. */
