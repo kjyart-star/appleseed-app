@@ -4099,12 +4099,192 @@ function expenseTotalSection(){
       "<div class='sum-chip'>개별지출<b class='tnum'>"+moneyMan(expThis)+"</b></div></div>"+
     "</div></section>";
 }
+/* ---- 지출 현황 그래프 ----
+   지출은 세 갈래(fixedcost / cards / expense)로 각각 다른 테이블에서만 뽑으므로 서로 겹치지 않는다.
+   AI 구독료는 법인카드 결제분에 이미 포함되어 있어 따로 더하지 않는다.
+   고정경비는 반드시 fcMonthVal(부담률 적용)로만 합산한다 — 청구액 전액을 쓰면 안 된다. */
+var expChartMode = "month";   /* "month" | "year" */
+var expChartYear = null;
+var EXP_SERIES = [
+  { key:"fixed", name:"고정경비(부담분)", color:"var(--vfx)" },
+  { key:"card",  name:"법인카드",         color:"var(--cost)" },
+  { key:"exp",   name:"단건 지출",        color:"var(--aiedu)" }
+];
+/* 데이터가 존재하는 연도 + 올해 */
+function expYearList(){
+  var ys = {};
+  (state.data.fixedcost||[]).forEach(function(r){ var y=Number(r.year); if(y) ys[y]=1; });
+  function scan(list){ (list||[]).forEach(function(x){ var y=Number(String(x.date||"").slice(0,4)); if(y) ys[y]=1; }); }
+  scan(cardsAll()); scan(state.data.expense);
+  var out = Object.keys(ys).map(Number);
+  var cy = seoulNow().getFullYear();
+  if (out.indexOf(cy)<0) out.push(cy);
+  out.sort(function(a,b){ return a-b; });
+  return out;
+}
+/* 해당 연도의 1~12월 3갈래 합계 */
+function expMonthlyRows(year){
+  year = Number(year);
+  var rows = [], m;
+  for (m=1; m<=12; m++) rows.push({ label:m+"월", key:year+"-"+pad2(m), fixed:0, card:0, exp:0 });
+  (state.data.fixedcost||[]).forEach(function(r){
+    if (Number(r.year)!==year) return;
+    for (var k=1; k<=12; k++) rows[k-1].fixed += fcMonthVal(r, k);   /* 부담률 적용분만 */
+  });
+  function addDated(list, field){
+    (list||[]).forEach(function(x){
+      var s = String(x.date||"");
+      if (Number(s.slice(0,4))!==year) return;
+      var mi = Number(s.slice(5,7));
+      if (mi>=1 && mi<=12) rows[mi-1][field] += Number(x.amount)||0;
+    });
+  }
+  addDated(cardsAll(), "card");
+  addDated(state.data.expense, "exp");
+  return rows;
+}
+/* 데이터가 있는 연도들의 연간 총지출 */
+function expYearRows(){
+  var out = [];
+  expYearList().forEach(function(y){
+    var t = { label:y+"년", key:String(y), fixed:0, card:0, exp:0 };
+    expMonthlyRows(y).forEach(function(r){ t.fixed+=r.fixed; t.card+=r.card; t.exp+=r.exp; });
+    if (t.fixed+t.card+t.exp > 0) out.push(t);
+  });
+  return out;
+}
+function expRowTotal(r){ return r.fixed + r.card + r.exp; }
+/* 누적 막대 SVG (만원 단위). curKey 와 같은 key 의 막대는 테두리로 강조 */
+function expStackChartSVG(rows, curKey){
+  var W = Math.max(720, rows.length*74), H=300, padL=54, padR=16, padT=22, padB=42;
+  var plotW=W-padL-padR, plotH=H-padT-padB, yb=padT+plotH;
+  var maxV = 0;
+  rows.forEach(function(r){ maxV = Math.max(maxV, expRowTotal(r)/10000); });
+  maxV = Math.max(maxV, 10);
+  var step = Math.pow(10, Math.floor(Math.log(maxV)/Math.LN10));
+  var maxY = Math.ceil(maxV/step)*step; if (maxY<maxV*1.05) maxY += step;
+  function yOf(v){ return yb - (v/maxY)*plotH; }
+  var s = "<svg class='bars' viewBox='0 0 "+W+" "+H+"' role='img'>";
+  var ticks=4, g;
+  for (g=0; g<=ticks; g++){
+    var v = maxY*g/ticks, y = yOf(v);
+    s += "<line x1='"+padL+"' y1='"+y+"' x2='"+(W-padR)+"' y2='"+y+"' class='"+(g===0?"zero-line":"grid-line")+"'></line>";
+    s += "<text x='"+(padL-8)+"' y='"+(y+4)+"' text-anchor='end' class='axis-txt'>"+comma(v)+"</text>";
+  }
+  var groupW = plotW/rows.length, barW = Math.min(48, groupW*0.5);
+  rows.forEach(function(r,i){
+    var bx = padL + groupW*i + (groupW-barW)/2;
+    var total = expRowTotal(r)/10000, acc = 0;
+    EXP_SERIES.forEach(function(se){
+      var v = r[se.key]/10000;
+      if (v<=0) return;
+      var h = (v/maxY)*plotH, yTop = yOf(acc+v);
+      var isTop = (acc+v) >= total-0.0001;
+      s += "<rect class='bar-rect' x='"+bx+"' y='"+yTop+"' width='"+barW+"' height='"+Math.max(h,1)+"' rx='"+(isTop?4:0)+"' fill='"+se.color+"'"+
+           " data-tip=\"<b>"+esc(r.label)+" · "+se.name+"</b>"+
+           "<div class=&#39;tt-row&#39;><span>지출</span><span>"+comma(v)+"만원</span></div>"+
+           "<div class=&#39;tt-row&#39;><span>합계</span><span>"+comma(total)+"만원</span></div>\"></rect>";
+      acc += v;
+    });
+    if (total>0){
+      s += "<text x='"+(bx+barW/2)+"' y='"+(yOf(total)-7)+"' text-anchor='middle' class='axis-txt' fill='var(--ink-2)' font-weight='700'>"+comma(total)+"</text>";
+      if (curKey && r.key===curKey){
+        s += "<rect x='"+(bx-2.5)+"' y='"+(yOf(total)-2.5)+"' width='"+(barW+5)+"' height='"+(yb-yOf(total)+2.5)+"' rx='6' fill='none' stroke='var(--accent)' stroke-width='2' pointer-events='none'></rect>";
+      }
+    }
+    s += "<text x='"+(bx+barW/2)+"' y='"+(yb+22)+"' text-anchor='middle' class='axis-txt month'>"+esc(r.label)+"</text>";
+  });
+  s += "</svg>";
+  return s;
+}
+/* 차트 영역 내부만 만드는 함수 — 토글·연도 전환 시 이 결과만 갈아끼운다 */
+function expChartInner(){
+  var now = seoulNow(), curY = now.getFullYear(), curM = now.getMonth()+1;
+  var years = expYearList();
+  if (!expChartYear || years.indexOf(Number(expChartYear))<0) expChartYear = (years.indexOf(curY)>=0 ? curY : years[years.length-1]);
+  expChartYear = Number(expChartYear);
+  var isYear = (expChartMode==="year");
+
+  var rows = isYear ? expYearRows() : expMonthlyRows(expChartYear);
+  var curKey = isYear ? String(curY) : (curY+"-"+pad2(curM));
+
+  /* 월평균 계산용: 값이 0인 달은 제외 */
+  var mrows = [];
+  if (isYear) expYearList().forEach(function(y){ mrows = mrows.concat(expMonthlyRows(y)); });
+  else mrows = rows;
+  var nz = mrows.filter(function(r){ return expRowTotal(r) > 0; });
+  var avg = nz.length ? Math.round(nz.reduce(function(a,r){ return a+expRowTotal(r); },0)/nz.length) : 0;
+
+  var tot = { fixed:0, card:0, exp:0 };
+  rows.forEach(function(r){ tot.fixed+=r.fixed; tot.card+=r.card; tot.exp+=r.exp; });
+  var grand = tot.fixed + tot.card + tot.exp;
+
+  /* 이번 달 / 지난 달은 실제 현재 월 기준(연도 선택과 무관) */
+  function monthTotal(y, m){ return expRowTotal(expMonthlyRows(y)[m-1]); }
+  var thisTot = monthTotal(curY, curM);
+  var prevY = (curM===1) ? curY-1 : curY, prevM = (curM===1) ? 12 : curM-1;
+  var prevTot = monthTotal(prevY, prevM);
+  var deltaTxt;
+  if (prevTot>0){
+    var pct = (thisTot-prevTot)/prevTot*100, up = (pct>=0);
+    deltaTxt = "<span style='font-size:11px;font-weight:800;color:"+(up?"var(--urgent)":"var(--pos)")+"'>"+(up?"▲":"▼")+" "+Math.abs(pct).toFixed(1)+"%</span>";
+  } else {
+    deltaTxt = "<span style='font-size:11px;color:var(--ink-3)'>전월 데이터 없음</span>";
+  }
+
+  var modeChips = "<button class='proj-chip"+(isYear?"":" on")+"' data-exp-mode='month'>월별</button>"+
+                  "<button class='proj-chip"+(isYear?" on":"")+"' data-exp-mode='year'>연도별</button>";
+  var yChips = isYear ? "" : years.map(function(y){
+    return "<button class='proj-chip"+(y===expChartYear?" on":"")+"' data-exp-cy='"+y+"'>"+y+"년</button>";
+  }).join("");
+
+  var h = "<div style='display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px'>"+
+    "<div class='proj-chips'>"+modeChips+"</div><div class='proj-chips'>"+yChips+"</div></div>";
+
+  h += "<div class='sum-strip' style='padding:0 0 12px'>"+
+    "<div class='sum-chip'>"+(isYear ? "전체 총지출" : expChartYear+"년 총지출")+"<b class='tnum'>"+moneyMan(grand)+"</b></div>"+
+    "<div class='sum-chip'>이번 달("+curM+"월) 지출<b class='tnum'>"+moneyMan(thisTot)+"</b>"+deltaTxt+"</div>"+
+    "<div class='sum-chip'>월 평균 ("+nz.length+"개월)<b class='tnum'>"+moneyMan(avg)+"</b></div></div>";
+
+  if (!rows.length || grand<=0){
+    h += "<div class='empty'>표시할 지출 데이터가 없습니다."+(isYear?"":" 고정경비·법인카드·단건 지출을 먼저 입력하세요.")+"</div>";
+    return h;
+  }
+
+  h += "<div class='legend'>";
+  EXP_SERIES.forEach(function(se){
+    h += "<span><span class='swatch' style='background:"+se.color+"'></span>"+se.name+
+         " <b class='tnum' style='color:var(--ink)'>"+moneyMan(tot[se.key])+"</b></span>";
+  });
+  h += "</div><div class='chart-scroll'>"+expStackChartSVG(rows, curKey)+"</div>";
+  return h;
+}
+function expenseChartSection(){
+  return "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>지출 현황</div><h3>지출 추이</h3>"+
+      "<div class='sec-note' style='margin-top:4px'>고정경비(부담률 적용한 우리 부담분) · 법인카드 · 단건 지출을 합친 실지출입니다. "+
+      "세 갈래는 각각 다른 표에서만 뽑아 중복 합산되지 않습니다. 단위: 만원</div></div></div>"+
+    "<div class='chart-body' data-exp-chart>"+expChartInner()+"</div></section>";
+}
+function bindExpenseChart(){
+  var box = C.querySelector("[data-exp-chart]");
+  if (!box) return;
+  function redraw(){ box.innerHTML = expChartInner(); bindExpenseChart(); applyMask(); }
+  box.querySelectorAll("[data-exp-mode]").forEach(function(b){
+    b.onclick = function(){ expChartMode = b.getAttribute("data-exp-mode"); redraw(); };
+  });
+  box.querySelectorAll("[data-exp-cy]").forEach(function(b){
+    b.onclick = function(){ expChartYear = Number(b.getAttribute("data-exp-cy")); redraw(); };
+  });
+}
+
 function renderExpenses(){
   var d = state.data, list = (d.expense||[]).slice().sort(function(a,b){ return String(b.date||"").localeCompare(String(a.date||"")); });
   var sum = list.reduce(function(a,x){return a+(Number(x.amount)||0);},0);
   var byCat = {};
   list.forEach(function(x){ var c=x.category||"기타"; byCat[c]=(byCat[c]||0)+(Number(x.amount)||0); });
   var html = pageHead("expenses","", "<button class='btn primary' data-add>+ 지출 추가</button>");
+  html += expenseChartSection();
   html += expenseTotalSection();
   html += fixedCostSection();
   html += cardsSection();
@@ -4120,6 +4300,7 @@ function renderExpenses(){
   html += "</div></section>";
   C.innerHTML = html;
   C.querySelector("[data-add]").onclick = function(){ openForm("expense", null); };
+  bindExpenseChart();
   bindFixedCost();
   bindCards();
   var sgo = C.querySelector("[data-subs-go]");
