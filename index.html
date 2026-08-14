@@ -1605,7 +1605,7 @@ var MENU = [
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
   { cap:"커뮤니케이션", items:[ ["namecard","🪪","명함관리",1], ["newsletter","📰","뉴스레터",1] ] },
   { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["festivals","🎥","AI 영화제",0], ["gov","🏛️","AI 지원사업",0], ["newsrep","📰","뉴스리포트",0], ["youtube","▶️","AI 유튜브",0], ["library","📚","자료실",0], ["reports","📑","리포트",0] ] },
-  { cap:"시스템", items:[ ["cert","🏷️","재직증명서",1] ] }
+  { cap:"시스템", items:[ ["company","🏢","회사정보",0], ["cert","🏷️","재직증명서",1] ] }
 ];
 var TITLES = {};
 MENU.forEach(function(g){ g.items.forEach(function(it){ TITLES[it[0]] = it[2]; }); });
@@ -2099,13 +2099,18 @@ var FIELDS = {
     ["note","메모","text"] ],
   offset: [ ["date","날짜","date"], ["type","구분","select",["받을금액","현금수령"]],
     ["counterpart","상대처","text"], ["amount","금액(원)","number"], ["memo","메모","text"] ],
+  company: [ ["category","분류","select",["기본","주소","계좌","세무","차량","대표","기타"]], ["label","항목","text"],
+    ["value","내용","text"], ["memo","메모","textarea"], ["sort","정렬순서","number"] ],
+  insurance: [ ["kind","구분","select",["자동차","화재","배상책임","기타"]], ["insurer","보험사","text"],
+    ["policy_no","증권번호","text"], ["target","대상","text"], ["start_date","시작일","date"], ["end_date","만기일","date"],
+    ["premium","보험료(원)","number"], ["payer","납입","text"], ["memo","메모","textarea"] ],
   payouts: [ ["date","지급일","date"], ["name","이름","text"], ["title","작업","text"],
     ["project","프로젝트","text"], ["contract","계약금액(원)","number"], ["paid","지급액(원)","number"],
     ["bank","입금계좌","text"], ["rrn","신고용 식별번호","text"], ["account","입금계좌 전체","text"],
     ["memo","메모","text"] ]
 };
 var NUMS = { amount:1, contract_amount:1, progress:1, year:1, payday:1, share:1, contract:1, paid:1,
-  m1:1,m2:1,m3:1,m4:1,m5:1,m6:1,m7:1,m8:1,m9:1,m10:1,m11:1,m12:1 };
+  m1:1,m2:1,m3:1,m4:1,m5:1,m6:1,m7:1,m8:1,m9:1,m10:1,m11:1,m12:1, sort:1, premium:1 };
 var BOOLS = { done:1, all_day:1 };
 
 function openForm(table, row, defaults){
@@ -3264,6 +3269,16 @@ function mountProjectWorkspace(container){
     }
     var btn = subsEl.querySelector("[data-subs-go]");
     if (btn) btn.onclick = function(){ location.hash="#subs"; };
+    /* 보험 만기 알림 — 구독 계산에는 손대지 않고, 만기 30일 이내 건이 있을 때만 카드를 하나 덧붙인다. */
+    var insSoon = insuranceSoonest(30);
+    if (insSoon){
+      subsEl.insertAdjacentHTML("beforeend", "<button class='proj-subs-card' data-ins-go>"+
+        "<div class='ps-h'><span>🛡️ 보험 만기</span><span class='ps-arrow'>→</span></div>"+
+        "<div class='ps-sub'>"+esc(insSoon.x.kind||"보험")+(insSoon.x.insurer?" · "+esc(insSoon.x.insurer):"")+"</div>"+
+        "<div class='ps-soon'>D-"+insSoon.d+" · 갱신 준비</div></button>");
+      var insBtn = subsEl.querySelector("[data-ins-go]");
+      if (insBtn) insBtn.onclick = function(){ location.hash="#company"; };
+    }
     applyMask();
   }
 
@@ -7165,13 +7180,360 @@ function renderMailView(view){
   refresh();
 }
 
+/* ============ 회사정보 (기본정보 · 보험 · 법인서류) ============
+   company   : 사업자·주소·계좌·세무 등 자주 찾아 쓰는 고정 정보. 카테고리로 묶어 보여준다.
+   insurance : 보험 "계약" 관리 전용. 보험료는 지출 합계에 넣지 않는다(실제 결제는 카드·계좌에서 잡힌다).
+   법인서류   : 자료실 게시판과 같은 첨부 구조를 쓰되, 소유자 id 를 "_company" 문자열로 고정한다. */
+
+function companyAll(){ return (state.data && state.data.company) || []; }
+function insuranceAll(){ return (state.data && state.data.insurance) || []; }
+
+/* ---- 회사 기본정보 ---- */
+/* 카테고리는 열려 있다. 자주 쓰는 것만 앞에 고정하고, 나머지는 가나다순으로 뒤에 붙인다. */
+var CO_CAT_ORDER = ["기본", "주소", "계좌", "세무", "차량"];
+var CO_COPY_CAT = "주소";
+
+function companyCats(list){
+  var seen = {}, found = [];
+  list.forEach(function(r){
+    var c = String(r.category || "기타");
+    if (!seen[c]){ seen[c] = 1; found.push(c); }
+  });
+  var head = [], tail = [];
+  CO_CAT_ORDER.forEach(function(c){ if (seen[c]) head.push(c); });
+  found.forEach(function(c){ if (CO_CAT_ORDER.indexOf(c) < 0) tail.push(c); });
+  tail.sort(function(a, b){ return String(a).localeCompare(String(b), "ko"); });
+  return head.concat(tail);
+}
+
+function companyRowsOf(list, cat){
+  return list.filter(function(r){ return String(r.category || "기타") === cat; })
+    .sort(function(a, b){
+      var sa = Number(a.sort) || 0, sb = Number(b.sort) || 0;
+      if (sa !== sb) return sa - sb;
+      return String(a.label || "").localeCompare(String(b.label || ""), "ko");
+    });
+}
+
+function companySection(){
+  var list = companyAll();
+  var h = "<section class='panel'>" +
+    "<div class='sec-head'><div><div class='eyebrow'>회사 기본정보</div>" +
+      "<h3>사업자 · 주소 · 계좌 · 세무</h3>" +
+      "<div class='sec-note' style='margin-top:4px'>견적서·계약서·세금계산서에 그대로 옮겨 쓰는 값입니다. 여기 있는 값이 원본입니다.</div></div>" +
+    "<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>" +
+      "<button class='btn sm' data-co-add>+ 항목 추가</button></div></div>";
+
+  if (!list.length){
+    return h + "<div class='empty'>등록된 회사 정보가 없습니다. ‘+ 항목 추가’로 사업자번호·주소·계좌부터 넣어 두세요.</div></section>";
+  }
+
+  companyCats(list).forEach(function(cat){
+    var rows = companyRowsOf(list, cat);
+    if (!rows.length) return;
+    var body = "";
+    rows.forEach(function(r){
+      var val = String(r.value == null ? "" : r.value);
+      var valHtml = val
+        ? esc(val)
+        : "<span style='color:var(--ink-3)'>미입력</span>";
+      if (cat === CO_COPY_CAT){
+        valHtml += " <button class='btn sm ghost' data-co-copy='" + r.id + "' style='margin-left:6px'>복사</button>";
+      }
+      if (r.memo){
+        valHtml += "<div class='sec-note' style='margin-top:3px'>" + esc(r.memo) + "</div>";
+      }
+      body += "<tr><td>" + esc(r.label || "") + "</td>" +
+        "<td>" + valHtml + "</td>" +
+        "<td class='r'><div class='row-actions'><button class='icon-btn' data-co-edit='" + r.id + "'>✎</button>" +
+          "<button class='icon-btn del' data-co-del='" + r.id + "'>🗑</button></div></td></tr>";
+    });
+    h += "<div class='panel-b' style='padding-top:0'><div class='eyebrow' style='margin:10px 0 6px'>" + esc(cat) + "</div>" +
+      "<div class='tbl-scroll'><table><thead><tr><th>항목</th><th>내용</th><th class='r'>관리</th></tr></thead>" +
+      "<tbody>" + body + "</tbody></table></div></div>";
+  });
+
+  return h + "</section>";
+}
+
+/* 클립보드: 최신 브라우저는 navigator.clipboard, 안 되면 임시 textarea + execCommand 로 떨어진다. */
+function companyCopyText(txt){
+  var s = String(txt == null ? "" : txt);
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(s);
+  }
+  return new Promise(function(resolve, reject){
+    try{
+      var ta = document.createElement("textarea");
+      ta.value = s;
+      ta.setAttribute("readonly", "readonly");
+      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, s.length);
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if (ok) resolve(); else reject(new Error("copy failed"));
+    }catch(e){ reject(e); }
+  });
+}
+
+function bindCompany(){
+  var add = C.querySelector("[data-co-add]");
+  if (add) add.onclick = function(){ openForm("company", null, { category: "기본", sort: 0 }); };
+
+  C.querySelectorAll("[data-co-edit]").forEach(function(b){
+    b.onclick = function(){ openForm("company", findById(companyAll(), b.getAttribute("data-co-edit"))); };
+  });
+  C.querySelectorAll("[data-co-del]").forEach(function(b){
+    b.onclick = function(){ delRow("company", b.getAttribute("data-co-del")); };
+  });
+  C.querySelectorAll("[data-co-copy]").forEach(function(b){
+    b.onclick = function(){
+      var row = findById(companyAll(), b.getAttribute("data-co-copy"));
+      if (!row) return;
+      companyCopyText(row.value || "").then(function(){
+        showAlertDlg("주소를 복사했습니다.", "복사 완료", true);
+      }).catch(function(){
+        showAlertDlg("복사에 실패했습니다. 값을 직접 선택해 복사해 주세요.", "복사 실패", false);
+      });
+    };
+  });
+}
+
+/* ---- 보험 계약 관리 ---- */
+function insuranceDaysLeft(endDate){
+  var d = parseDate(endDate);
+  if (!d) return null;
+  var today = seoulNow();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((d - today) / 86400000);
+}
+
+/* .dday 는 폭이 56px 로 고정돼 있다. "만기 경과" 같은 긴 글자는 인라인으로 폭만 풀어 쓴다. */
+function insDdayHtml(cls, txt){
+  return "<span class='dday " + cls + " tnum' style='display:inline-block;width:auto;padding:6px 10px'>" + esc(txt) + "</span>";
+}
+
+function insMemoHtml(memo){
+  return esc(String(memo == null ? "" : memo)).replace(/\r\n/g, "\n").replace(/\n/g, "<br>");
+}
+
+/* 대시보드 알림용: 만기가 within 일 이내로 가장 임박한 보험 1건 */
+function insuranceSoonest(within){
+  var best = null;
+  insuranceAll().forEach(function(x){
+    var dv = insuranceDaysLeft(x.end_date);
+    if (dv === null || dv < 0 || dv > within) return;
+    if (best === null || dv < best.d) best = { d: dv, x: x };
+  });
+  return best;
+}
+
+function insuranceSection(){
+  var list = insuranceAll().slice().sort(function(a, b){
+    return String(a.end_date || "9999").localeCompare(String(b.end_date || "9999"));
+  });
+  var h = "<section class='panel'>" +
+    "<div class='sec-head'><div><div class='eyebrow'>보험</div><h3>보험 계약 관리</h3>" +
+      "<div class='sec-note' style='margin-top:4px'>이 표는 보험 <b>계약</b>을 관리하는 표입니다. 보험료는 지출 합계에 집계되지 않습니다 — 실제 결제는 법인카드·계좌에서 잡힙니다.</div></div>" +
+    "<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>" +
+      "<button class='btn sm' data-in-add>+ 보험 등록</button></div></div>";
+
+  if (!list.length){
+    return h + "<div class='empty'>등록된 보험이 없습니다. 자동차·화재·배상책임 계약을 등록해 두면 만기를 놓치지 않습니다.</div></section>";
+  }
+
+  var body = "";
+  list.forEach(function(x){
+    var dv = insuranceDaysLeft(x.end_date);
+    var leftHtml;
+    if (dv === null){
+      leftHtml = "<span style='color:var(--ink-3)'>미정</span>";
+    } else if (dv < 0){
+      leftHtml = insDdayHtml("over", "만기 경과");
+    } else if (dv <= 30){
+      leftHtml = insDdayHtml("soon", "D-" + dv) +
+        "<span class='chip wait' style='margin-left:6px'>갱신 준비</span>";
+    } else {
+      leftHtml = insDdayHtml("far", "D-" + dv);
+    }
+
+    var period = (x.start_date || x.end_date)
+      ? esc(String(x.start_date || "").slice(0, 10)) + " ~ " + esc(String(x.end_date || "").slice(0, 10))
+      : "<span style='color:var(--ink-3)'>미입력</span>";
+
+    var hasMemo = !!String(x.memo || "").trim();
+    body += "<tr><td><span class='mini-tag vfx'>" + esc(x.kind || "기타") + "</span></td>" +
+      "<td>" + esc(x.insurer || "") + "</td>" +
+      "<td>" + esc(x.target || "") + "</td>" +
+      "<td class='tnum'>" + period + "</td>" +
+      "<td class='r tnum'>" + moneyWon(x.premium) + "</td>" +
+      "<td>" + leftHtml + "</td>" +
+      "<td class='r'><div class='row-actions'>" +
+        (hasMemo ? "<button class='btn sm ghost' data-in-detail='" + x.id + "'>자세히</button>" : "") +
+        "<button class='icon-btn' data-in-edit='" + x.id + "'>✎</button>" +
+        "<button class='icon-btn del' data-in-del='" + x.id + "'>🗑</button></div></td></tr>";
+
+    if (hasMemo){
+      body += "<tr data-in-row='" + x.id + "' style='display:none'>" +
+        "<td colspan='7' style='background:var(--surface-2)'>" +
+        "<div class='sec-note' style='line-height:1.7'>" + insMemoHtml(x.memo) + "</div>" +
+        (x.policy_no ? "<div class='sec-note' style='margin-top:6px'>증권번호 " + esc(x.policy_no) + (x.payer ? " · 납입 " + esc(x.payer) : "") + "</div>" : "") +
+        "</td></tr>";
+    }
+  });
+
+  h += "<div class='tbl-scroll'><table><thead><tr><th>구분</th><th>보험사</th><th>대상</th><th>보험기간</th>" +
+    "<th class='r'>보험료</th><th>만기까지</th><th class='r'>관리</th></tr></thead><tbody>" + body + "</tbody></table></div>";
+  return h + "</section>";
+}
+
+function bindInsurance(){
+  var add = C.querySelector("[data-in-add]");
+  if (add) add.onclick = function(){ openForm("insurance", null, { kind: "자동차" }); };
+
+  C.querySelectorAll("[data-in-edit]").forEach(function(b){
+    b.onclick = function(){ openForm("insurance", findById(insuranceAll(), b.getAttribute("data-in-edit"))); };
+  });
+  C.querySelectorAll("[data-in-del]").forEach(function(b){
+    b.onclick = function(){ delRow("insurance", b.getAttribute("data-in-del")); };
+  });
+  C.querySelectorAll("[data-in-detail]").forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute("data-in-detail");
+      var tr = C.querySelector("[data-in-row='" + id + "']");
+      if (!tr) return;
+      var open = (tr.style.display === "none");
+      tr.style.display = open ? "" : "none";
+      b.textContent = open ? "접기" : "자세히";
+    };
+  });
+}
+
+/* ---- 법인서류 보관함 ----
+   자료실 게시판 첨부와 같은 구조. 소유자 id 만 게시글 id 대신 "_company" 문자열로 고정한다.
+   data-cda-* 는 게시판의 data-bda-* 와 절대 겹치지 않게 접두사를 다르게 둔다. */
+var CO_DOC_OWNER = "_company";
+
+function companyDocsSection(){
+  var atts = attRowsForProjectId(CO_DOC_OWNER);
+  var h = "<section class='panel' id='coDocBox'>" +
+    "<div class='sec-head'><div><div class='eyebrow'>법인서류</div><h3>법인서류 보관함 (" + atts.length + "건)</h3>" +
+      "<div class='sec-note' style='margin-top:4px'>사업자등록증·통장사본 등 법인 서류를 여기에 보관합니다.</div></div>" +
+    "<div class='row-actions'>" +
+      "<button type='button' class='btn sm primary' data-cda-add>📁 파일 첨부</button>" +
+      "<button type='button' class='btn sm ghost' data-cda-link>🔗 링크 추가</button>" +
+      "<input type='file' id='coDocFile' multiple accept='" + LIB_ACCEPT + "' style='display:none'>" +
+    "</div></div><div class='panel-b'>";
+
+  var inlineImgHtml = renderInlineImages(atts);
+  if (inlineImgHtml) h += inlineImgHtml;
+
+  if (!atts.length){
+    h += "<div class='empty'>보관된 서류가 없습니다.<br>이 영역에 파일을 끌어다 놓거나 ‘📁 파일 첨부’를 눌러 추가하세요.</div>";
+  } else {
+    h += "<div class='att-list-items'>";
+    atts.forEach(function(att, aIdx){
+      h += "<div class='att-item-row'>" +
+        "<div class='att-item-main'>" +
+          boardAttBadge(att) +
+          "<span class='att-item-name'>" + esc(att.name || "") + "</span>" +
+          "<span class='att-item-meta tnum'>" + esc(att.size || "") + "</span>" +
+          "<span class='att-item-meta tnum'>" + esc(att.date || "") + "</span>" +
+        "</div>" +
+        "<div class='row-actions'>" +
+          "<button type='button' class='btn sm primary' data-cda-view='" + aIdx + "'>" + (attIsVideo(att) ? "▶️ 재생" : "👁️ 보기") + "</button>" +
+          "<button type='button' class='btn sm ghost' data-cda-dl='" + aIdx + "'>💾 다운로드</button>" +
+          "<button type='button' class='att-item-del' data-cda-del='" + aIdx + "' title='삭제'>🗑</button>" +
+        "</div>" +
+      "</div>";
+    });
+    h += "</div>";
+  }
+  return h + "</div></section>";
+}
+
+function bindCompanyDocs(){
+  var atts = attRowsForProjectId(CO_DOC_OWNER);
+  var box = C.querySelector("#coDocBox");
+  var fileIn = C.querySelector("#coDocFile");
+  var addBtn = C.querySelector("[data-cda-add]");
+
+  if (addBtn && fileIn){
+    fileIn.onchange = function(){
+      handleFileUploadOrDrivePrompt(fileIn.files, null, renderCompany, CO_DOC_OWNER);
+      fileIn.value = "";
+    };
+    addBtn.onclick = function(){ fileIn.click(); };
+  }
+  if (box){
+    setupDragAndDrop(box, function(files){
+      handleFileUploadOrDrivePrompt(files, null, renderCompany, CO_DOC_OWNER);
+    });
+  }
+
+  var linkBtn = C.querySelector("[data-cda-link]");
+  if (linkBtn){
+    linkBtn.onclick = function(){
+      var u = prompt("첨부할 링크 URL을 입력하세요");
+      if (!u) return;
+      u = String(u).trim();
+      if (!u) return;
+      insertAttachmentRow(CO_DOC_OWNER, {
+        name: u, type: "link", size: "Link",
+        date: seoulNow().toISOString().slice(0, 10),
+        url: u, gdrive_id: ""
+      }).then(function(){ renderCompany(); });
+    };
+  }
+
+  C.querySelectorAll("[data-cda-view]").forEach(function(b){
+    b.onclick = function(){
+      var idx = parseInt(b.getAttribute("data-cda-view"), 10);
+      if (atts[idx]) openAttachmentPreview(atts[idx]);
+    };
+  });
+  C.querySelectorAll("[data-cda-dl]").forEach(function(b){
+    b.onclick = function(){
+      var idx = parseInt(b.getAttribute("data-cda-dl"), 10);
+      if (atts[idx]) downloadAttachment(atts[idx]);
+    };
+  });
+  C.querySelectorAll("[data-cda-del]").forEach(function(b){
+    b.onclick = function(){
+      var idx = parseInt(b.getAttribute("data-cda-del"), 10);
+      confirmDlg("이 서류를 삭제할까요?", "삭제", "법인서류 삭제").then(function(ok){
+        if (!ok) return;
+        var curAtts = attRowsForProjectId(CO_DOC_OWNER);
+        deleteAttachmentItem(CO_DOC_OWNER, curAtts, idx, "법인서류", renderCompany);
+      });
+    };
+  });
+}
+
+/* ---- 화면 ---- */
+function renderCompany(){
+  var html = pageHead("company", "", "");
+  html += companySection();
+  html += insuranceSection();
+  html += companyDocsSection();
+  C.innerHTML = html;
+  bindInlineImageFallback(C);
+  bindCompany();
+  bindInsurance();
+  bindCompanyDocs();
+  applyMask();
+}
+
 var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
   memos:renderMemos, mail:function(){ renderMailView("mail"); },
   inquiries:function(){ renderMailView("inquiries"); }, clients:renderClients, projects:renderProjects, revenue:renderRevenue,
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
   newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov,
-  subs:renderSubs, library:renderLibrary, homepage:renderHomepage, cardhist:renderCardHist
+  subs:renderSubs, library:renderLibrary, homepage:renderHomepage, cardhist:renderCardHist,
+  company:renderCompany
 };
 /* 마스터 키 오류 화면 — 금고(config/portal)의 키를 수신부(GAS)가 거부했을 때.
    키 수동 입력 게이트는 제거됨 — 어드민만 여기서 새 키를 금고에 재등록할 수 있다. */
