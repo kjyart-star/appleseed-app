@@ -2518,20 +2518,29 @@ function mountCalendar(container){
    상계(offset)는 이미 고정경비로 잡힌 금액이라 넣지 않는다 — 넣으면 이중 계상이다.
    payouts 는 contract(계약금액)가 아니라 paid(실지급액)만 더한다 — 원천징수분은 통장에서 나가지 않는다.
    payroll 은 payrollSpend() 로만 더한다 — 발행됐어도 실제 지급 전이면 통장에서 나가지 않았으므로 지출이 아니며(미지급금=부채),
-   지급완료분도 base_pay 가 아니라 net_pay 만 쓴다(4대보험·원천세는 이미 expense 에 자동이체로 잡혀 있어 기본급을 쓰면 이중 계상). */
+   지급완료분도 base_pay 가 아니라 net_pay 만 쓴다(4대보험·원천세는 이미 expense 에 자동이체로 잡혀 있어 기본급을 쓰면 이중 계상).
+   매출·매입(expense)은 공급가액(supply) 기준이다 — 부가세는 손익이 아니다.
+   카드·외주 인건비·고정경비·급여는 총액 그대로 둔다 — 세금계산서가 없거나 부가세 대상이 아니라 매입세액 공제를 못 받으므로 총액이 곧 비용이다. */
+/* 공급가액 헬퍼 — amount 는 부가세 포함 총액이다. 부가세는 회사의 수익도 비용도 아니라
+   (국가에 낼 돈을 잠시 받아둔 것) 손익은 반드시 공급가액으로 계산한다.
+   monthlyAgg() 와 누적 카드(ytdProfit)가 이 두 함수를 함께 쓰므로 두 화면의 숫자가 어긋나지 않는다.
+   매출은 supply 가 비면 amount/1.1 로 되돌리고, 매입은 면세·간이영수증이 섞여 있어 amount 를 그대로 쓴다. */
+function hasSupply(v){ return !(v==="" || v===null || v===undefined); }
+function revSupply(r){ return hasSupply(r && r.supply) ? (Number(r.supply)||0) : Math.round((Number(r&&r.amount)||0)/1.1); }
+function expSupply(x){ return hasSupply(x && x.supply) ? (Number(x.supply)||0) : (Number(x&&x.amount)||0); }
 function monthlyAgg(){
   var d = state.data, map = {};
   function ensure(k){ if(!map[k]) map[k]={key:k, done:0, wait:0, cost:0}; return map[k]; }
   (d.revenue||[]).forEach(function(r){
     var dt = parseDate(r.date); if(!dt) return;
     var k = dt.getFullYear()+"-"+pad2(dt.getMonth()+1);
-    var e = ensure(k); var amt = Number(r.amount)||0;
+    var e = ensure(k); var amt = revSupply(r);
     if (r.status==="입금완료") e.done += amt; else e.wait += amt;
   });
   (d.expense||[]).forEach(function(x){
     var dt = parseDate(x.date); if(!dt) return;
     var k = dt.getFullYear()+"-"+pad2(dt.getMonth()+1);
-    ensure(k).cost += Number(x.amount)||0;
+    ensure(k).cost += expSupply(x);
   });
   payoutsAll().forEach(function(x){
     var dt = parseDate(x.date); if(!dt) return;
@@ -5018,22 +5027,110 @@ function renderExpenses(){
   applyMask();
 }
 
+/* ============ 올해 누적 영업이익 (부가세 제외) ============
+   집계 범위가 이 계산의 전부다 — 틀리면 없는 적자가 생긴다.
+   1) 올해만. fixedcost 에는 작년(2025) 행이 그대로 남아 있다.
+   2) 현재월(포함)까지만. fixedcost 올해 행에는 9~12월 임대료가 미리 입력돼 있어,
+      그대로 더하면 아직 쓰지도 않은 돈이 적자로 잡힌다. 현재월은 new Date() 에서 구한다.
+   3) 매출은 입금완료분만 — 월별 손익표의 "순이익(확정)" 열과 같은 규칙이다. 대기분은 각주로만 알린다.
+   비용 다섯 갈래는 monthlyAgg() 와 같은 테이블·같은 헬퍼(expSupply/payoutPaid/fcMonthVal/payrollSpend)를
+   쓰므로 서로 중복되지 않고, 카드와 월별 표의 숫자도 어긋나지 않는다. */
+function ytdProfit(){
+  var d = state.data, now = new Date();
+  var Y = now.getFullYear(), M = now.getMonth()+1;
+  function inYtd(k){ return /^\d{4}-\d{2}$/.test(k) && Number(k.slice(0,4))===Y && Number(k.slice(5,7))<=M; }
+  function keyOf(s){ var dt = parseDate(s); return dt ? dt.getFullYear()+"-"+pad2(dt.getMonth()+1) : ""; }
+  var o = { year:Y, month:M, day:now.getDate(), rev:0, wait:0,
+            exp:0, card:0, payout:0, fixed:0, payroll:0, unpaid:0 };
+  (d.revenue||[]).forEach(function(r){
+    if (!inYtd(keyOf(r.date))) return;
+    if (r.status==="입금완료") o.rev += revSupply(r); else o.wait += revSupply(r);
+  });
+  (d.expense||[]).forEach(function(x){ if (inYtd(keyOf(x.date))) o.exp += expSupply(x); });
+  cardsAll().forEach(function(x){ if (inYtd(keyOf(x.date))) o.card += Number(x.amount)||0; });
+  payoutsAll().forEach(function(x){ if (inYtd(keyOf(x.date))) o.payout += payoutPaid(x); });
+  (d.fixedcost||[]).forEach(function(r){
+    if (Number(r.year)!==Y) return;
+    for (var m=1; m<=M; m++) o.fixed += fcMonthVal(r, m);
+  });
+  (d.payroll||[]).forEach(function(x){
+    var k = String(x.ym||"").slice(0,7); if (!inYtd(k)) return;
+    o.payroll += payrollSpend(x);
+    if (!payrollIsPaid(x)) o.unpaid += Number(x.net_pay)||0;
+  });
+  o.cost = o.exp + o.card + o.payout + o.fixed + o.payroll;
+  o.profit = o.rev - o.cost;
+  o.margin = o.rev>0 ? o.profit/o.rev*100 : 0;
+  return o;
+}
+/* 누적 영업이익 카드 — 사장님이 통장과 대조하시므로 만원 반올림 없이 원 단위로 적는다. */
+function ytdCardHTML(){
+  var y = ytdProfit();
+  var up = y.profit >= 0;
+  var col = up ? "var(--pos)" : "var(--urgent)";
+  function won(v){ return (v<0 ? "− " : "") + moneyWon(Math.abs(v)); }
+  function line(lb, v, sign){
+    return "<div style='display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:5px 0;font-size:13.5px'>"+
+      "<span style='color:var(--ink-2)'>"+lb+"</span>"+
+      "<span class='tnum' style='font-weight:700'>"+(sign||"")+moneyWon(v)+"</span></div>";
+  }
+  var h = "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>누적</div>"+
+    "<h3>"+y.year+"년 현재까지</h3></div>"+
+    "<div class='sec-note'>"+y.month+"월 "+y.day+"일 기준 · 부가세 제외</div></div>"+
+    "<div style='padding:16px 20px 20px'>";
+  h += line("매출 (공급가액)", y.rev, "");
+  h += line("비용 합계", y.cost, "− ");
+  h += "<div style='border-top:1px solid var(--line-strong);margin:12px 0 14px'></div>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:baseline;gap:14px'>"+
+    "<span style='font-weight:800;font-size:16px'>영업이익</span>"+
+    "<span class='tnum' style='font-size:38px;font-weight:800;line-height:1.15;color:"+col+"'>"+won(y.profit)+"</span></div>"+
+    "<div style='margin-top:7px;text-align:right;font-size:12.5px;color:var(--ink-2)'>이익률 "+
+    "<span class='tnum' style='color:"+col+";font-weight:700'>"+(y.profit<0?"−":"")+Math.abs(y.margin).toFixed(1)+"%</span>"+
+    "<span style='display:inline-block;margin-left:8px;padding:2px 9px;border-radius:999px;font-size:11.5px;"+
+    "font-weight:800;border:1px solid "+col+";color:"+col+"'>"+(up?"흑자":"적자")+"</span></div>";
+  h += "<div style='margin-top:14px;font-size:12.5px;color:var(--ink-2);line-height:1.7'>"+
+    "<b style='color:var(--ink)'>부가세 제외 기준입니다.</b> 매출·매입은 공급가액으로 계산해, 통장에 찍힌 금액과는 부가세만큼 차이가 납니다.";
+  if (y.wait > 0) h += "<br>입금 대기 "+moneyWon(y.wait)+"은 아직 매출로 잡지 않았습니다.";
+  if (y.unpaid > 0) h += "<br>미지급 급여 "+moneyWon(y.unpaid)+"은 아직 나가지 않아 비용에 포함되지 않았습니다.";
+  h += "</div>";
+  /* 비용 내역 — 합계 대비 비율. 다섯 갈래는 각각 다른 테이블에서만 뽑아 중복이 없다. */
+  var items = [["매입", y.exp], ["법인카드", y.card], ["외주 인건비", y.payout],
+               ["고정비 (우리 부담)", y.fixed], ["급여 (지급분)", y.payroll]];
+  h += "<div style='margin-top:18px;border-top:1px solid var(--line);padding-top:14px'>"+
+    "<div style='font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);"+
+    "font-weight:800;margin-bottom:11px'>비용 내역</div>";
+  items.forEach(function(it){
+    var pct = y.cost>0 ? it[1]/y.cost*100 : 0;
+    h += "<div style='margin-bottom:11px'><div style='display:flex;justify-content:space-between;gap:12px;"+
+      "font-size:12.5px;margin-bottom:5px'><span style='font-weight:700'>"+esc(it[0])+"</span>"+
+      "<span class='tnum' style='color:var(--ink-2)'>"+moneyWon(it[1])+" · "+pct.toFixed(1)+"%</span></div>"+
+      "<div class='prog'><i style='width:"+pct.toFixed(1)+"%'></i></div></div>";
+  });
+  h += "</div></div></section>";
+  return h;
+}
+
 /* ---- 영업이익분석 ---- */
 function renderProfit(){
   var d = state.data;
   var rows = monthlyAgg();
   var html = pageHead("profit","월별 손익 · 분류별 지출 · 유형별 매출 비중 (전부 실데이터 계산)","");
+  html += ytdCardHTML();
   // 차트
   html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>추이</div><h3>월별 매출 · 매입 · 순이익</h3></div><div class='sec-note'>단위: 만원 · 순이익=확정매출−매입</div></div><div class='chart-body'><div class='legend'><span><span class='swatch' style='background:var(--rev)'></span>매출(확정)</span><span><span class='swatch hatch'></span>매출(대기)</span><span><span class='swatch' style='background:var(--cost)'></span>매입</span></div><div class='chart-scroll'>"+barChartSVG(rows)+"</div></div></section>";
   // 표
-  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>표</div><h3>월별 손익표</h3></div></div><div class='tbl-scroll'>";
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>표</div><h3>월별 손익표</h3></div><div class='sec-note'>부가세 제외 · 누적은 해마다 리셋</div></div><div class='tbl-scroll'>";
   if (!rows.length) html += "<div class='empty'>데이터가 없습니다.</div>";
-  else { html += "<table><thead><tr><th>월</th><th class='r'>매출(확정)</th><th class='r'>매출(대기)</th><th class='r'>매입</th><th class='r'>순이익(확정)</th></tr></thead><tbody>";
+  else { html += "<table><thead><tr><th>월</th><th class='r'>매출(확정)</th><th class='r'>매출(대기)</th><th class='r'>매입</th><th class='r'>순이익(확정)</th><th class='r'>누적</th></tr></thead><tbody>";
     var tD=0,tW=0,tC=0;
+    /* 누적은 해가 바뀌면 0으로 리셋한다 — 작년과 올해가 한 줄로 이어지면 의미가 없다. */
+    var run=0, runY="";
     rows.forEach(function(r){ tD+=r.done; tW+=r.wait; tC+=r.cost;
       var np = r.done - r.cost;
-      html += "<tr><td class='tnum'>"+esc(r.key)+"</td><td class='r tnum'>"+moneyMan(r.done)+"</td><td class='r tnum'>"+moneyMan(r.wait)+"</td><td class='r tnum'>"+moneyMan(r.cost)+"</td><td class='r tnum' style='color:"+(np>=0?"var(--pos)":"var(--urgent)")+"'>"+moneyMan(np)+"</td></tr>"; });
-    html += "</tbody><tfoot><tr><td>합계</td><td class='r tnum'>"+moneyMan(tD)+"</td><td class='r tnum'>"+moneyMan(tW)+"</td><td class='r tnum'>"+moneyMan(tC)+"</td><td class='r tnum'>"+moneyMan(tD-tC)+"</td></tr></tfoot></table>"; }
+      var yk = r.key.slice(0,4); if (yk!==runY){ runY=yk; run=0; }
+      run += np;
+      html += "<tr><td class='tnum'>"+esc(r.key)+"</td><td class='r tnum'>"+moneyMan(r.done)+"</td><td class='r tnum'>"+moneyMan(r.wait)+"</td><td class='r tnum'>"+moneyMan(r.cost)+"</td><td class='r tnum' style='color:"+(np>=0?"var(--pos)":"var(--urgent)")+"'>"+moneyMan(np)+"</td><td class='r tnum' style='color:"+(run>=0?"var(--pos)":"var(--urgent)")+"'>"+moneyMan(run)+"</td></tr>"; });
+    html += "</tbody><tfoot><tr><td>합계</td><td class='r tnum'>"+moneyMan(tD)+"</td><td class='r tnum'>"+moneyMan(tW)+"</td><td class='r tnum'>"+moneyMan(tC)+"</td><td class='r tnum'>"+moneyMan(tD-tC)+"</td><td class='r'></td></tr></tfoot></table>"; }
   html += "</div></section>";
   // 분류별 지출 구성
   var byCat = {}; (d.expense||[]).forEach(function(x){ var c=x.category||"기타"; byCat[c]=(byCat[c]||0)+(Number(x.amount)||0); });
