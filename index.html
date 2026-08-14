@@ -601,6 +601,8 @@
   .fc-table .fc-cur{background:var(--accent-soft,rgba(80,150,120,.12));}
   .fc-table tfoot .fc-total td{font-weight:800; border-top:2px solid var(--line-strong); background:var(--surface-2,var(--surface));}
   .fc-table tfoot .fc-total td:first-child{position:sticky; left:0;}
+  /* 부담률 적용 실지출 행 — 청구 합계와 구분되게 강조 */
+  .fc-table tfoot .fc-ours td{border-top:1px solid var(--line); color:var(--accent-ink);}
   /* 프로젝트 목록 하단 AI 구독 요약 카드 */
   .proj-subs{padding:0 8px 10px; border-top:1px solid var(--line);}
   .proj-subs-card{display:block; width:100%; text-align:left; margin-top:10px; cursor:pointer;
@@ -3655,8 +3657,14 @@ function fixedCostSection(){
   var rows = all.filter(function(r){ return Number(r.year)===fixedYear; })
     .sort(function(a,b){ var ia=FC_ORDER.indexOf(a.category), ib=FC_ORDER.indexOf(b.category); return (ia<0?99:ia)-(ib<0?99:ib); });
   var MK = ["m1","m2","m3","m4","m5","m6","m7","m8","m9","m10","m11","m12"];
-  var mTot = [0,0,0,0,0,0,0,0,0,0,0,0], grand = 0;
-  rows.forEach(function(r){ MK.forEach(function(mk,i){ var v=fcMonthVal(r,i+1); mTot[i]+=v; grand+=v; }); });
+  /* 표 셀은 시트 원본(청구액) 그대로 보여주고, 부담률은 합계 행·요약에서만 적용한다.
+     그래야 "청구 얼마 → 50% → 우리 부담 얼마"가 화면에서 그대로 검산된다. */
+  var mBill = [0,0,0,0,0,0,0,0,0,0,0,0], grandBill = 0;   /* 청구액 */
+  var mTot  = [0,0,0,0,0,0,0,0,0,0,0,0], grand = 0;       /* 우리 부담분 */
+  rows.forEach(function(r){ MK.forEach(function(mk,i){
+    mBill[i] += Number(r[mk])||0; grandBill += Number(r[mk])||0;
+    var v=fcMonthVal(r,i+1); mTot[i]+=v; grand+=v;
+  }); });
   var thisMonth = (fixedYear===curY) ? mTot[curM-1] : 0;
   var yChips = yearList.map(function(y){ return "<button class='proj-chip"+(y===fixedYear?" on":"")+"' data-fy='"+y+"'>"+y+"년</button>"; }).join("");
   var mh = ""; for (var mi=1; mi<=12; mi++) mh += "<th class='r"+(fixedYear===curY&&mi===curM?" fc-cur":"")+"'>"+mi+"월</th>";
@@ -3668,25 +3676,34 @@ function fixedCostSection(){
       var bill = Number(r[mk])||0, v = fcMonthVal(r, i+1);
       rt += v; billTot += bill;
       var cur=(fixedYear===curY&&(i+1)===curM);
+      /* 셀에는 시트 원본(청구액)을 그대로 — 마우스를 올리면 부담분을 보여준다 */
       var tip = (partial && bill) ? " data-tip=\"<b>"+esc(r.category||"")+" "+(i+1)+"월</b>"+
         "<div class=&#39;tt-row&#39;><span>청구액</span><span>"+comma(bill)+"원</span></div>"+
         "<div class=&#39;tt-row&#39;><span>부담률</span><span>"+sh+"%</span></div>"+
         "<div class=&#39;tt-row&#39;><span>우리 부담</span><span>"+comma(v)+"원</span></div>\"" : "";
-      cells += "<td class='r tnum"+(cur?" fc-cur":"")+"'"+tip+">"+(v?comma(v):"<span class='fc-dash'>–</span>")+"</td>"; });
+      cells += "<td class='r tnum"+(cur?" fc-cur":"")+"'"+tip+">"+(bill?comma(bill):"<span class='fc-dash'>–</span>")+"</td>"; });
     var pay = (Number(r.payday)>0) ? "<span class='fc-pay'>매월 "+r.payday+"일</span>" : "";
     var shCell = "<td class='r fc-share"+(partial?"":" full")+"'>"+sh+"%</td>";
     body += "<tr><td class='fc-cat'>"+esc(r.category||"")+pay+"</td>"+shCell+cells+
-      "<td class='r tnum fc-rowtot'>"+comma(rt)+
-        ((partial&&billTot)?"<span class='fc-bill'>청구 "+comma(billTot)+"</span>":"")+"</td>"+
+      "<td class='r tnum fc-rowtot'>"+comma(billTot)+
+        ((partial&&billTot)?"<span class='fc-bill'>부담 "+comma(rt)+"</span>":"")+"</td>"+
       "<td class='r'><div class='row-actions'><button class='icon-btn' data-fc-edit='"+r.id+"'>✎</button><button class='icon-btn del' data-fc-del='"+r.id+"'>🗑</button></div></td></tr>";
   });
-  var tRow = "<tr class='fc-total'><td colspan='2'>월 합계</td>";
+  /* 합계는 두 줄 — ① 청구 합계(시트 그대로) ② 부담률 적용한 우리 실지출 */
+  var tRow = "<tr class='fc-total'><td colspan='2'>월 합계 <span class='fc-bill' style='display:inline;margin:0 0 0 6px'>청구액</span></td>";
+  mBill.forEach(function(t,i){ var cur=(fixedYear===curY&&(i+1)===curM); tRow += "<td class='r tnum"+(cur?" fc-cur":"")+"'>"+(t?comma(t):"–")+"</td>"; });
+  tRow += "<td class='r tnum'>"+comma(grandBill)+"</td><td></td></tr>";
+  /* 항목별 부담률이 모두 같으면 그 값을, 섞여 있으면 "부담률 적용"으로 표기 */
+  var shSet = {}; rows.forEach(function(r){ shSet[fcShare(r)] = 1; });
+  var shKeys = Object.keys(shSet);
+  var shLabel = (shKeys.length === 1) ? ("×"+shKeys[0]+"% 적용") : "부담률 적용";
+  tRow += "<tr class='fc-total fc-ours'><td colspan='2'>우리 부담 <span class='fc-share' style='margin-left:6px'>"+shLabel+"</span></td>";
   mTot.forEach(function(t,i){ var cur=(fixedYear===curY&&(i+1)===curM); tRow += "<td class='r tnum"+(cur?" fc-cur":"")+"'>"+(t?comma(t):"–")+"</td>"; });
   tRow += "<td class='r tnum'>"+comma(grand)+"</td><td></td></tr>";
   var h = "<section class='panel'>"+
     "<div class='sec-head'><div><div class='eyebrow'>고정경비 · 공동경비</div><h3>월별 고정비 ("+fixedYear+"년)</h3>"+
-      "<div class='sec-note' style='margin-top:4px'>표의 모든 금액은 부담률을 적용한 <b>우리 회사 실지출</b> 기준입니다. "+
-      "부담률이 100%가 아닌 항목은 셀에 마우스를 올리면 청구액 전액을 볼 수 있고, 연간 칸 아래에도 청구액을 함께 적었습니다.</div></div>"+
+      "<div class='sec-note' style='margin-top:4px'>표의 월별 금액은 <b>카드사 청구액 그대로</b>(시트 원본)입니다. "+
+      "맨 아래 <b>우리 부담</b> 행에서 부담률을 적용한 실지출을 확인하세요. 셀에 마우스를 올리면 청구액·부담률·우리 부담이 함께 보입니다.</div></div>"+
     "<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>"+
       (fixedYear===curY?"<div class='sum-chip'>이번 달("+curM+"월) 부담분<b class='tnum'>"+moneyMan(thisMonth)+"</b></div>":"")+
       "<div class='sum-chip'>연간 합계(부담분)<b class='tnum'>"+moneyMan(grand)+"</b></div>"+
