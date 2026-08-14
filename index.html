@@ -455,6 +455,21 @@
   .fld textarea{min-height:88px; resize:vertical;}
   .fld.chk-row{flex-direction:row; align-items:center; gap:8px;}
   .fld.chk-row input{width:auto;}
+
+  /* 사업소득 3.3% 원천징수 계산기 */
+  .po-calc{border:1px solid var(--line); border-radius:9px; padding:10px 12px; background:var(--surface-2);}
+  .po-head{display:flex; align-items:center; justify-content:space-between; gap:8px;
+    font-size:12px; font-weight:700; color:var(--ink-2);}
+  .po-head .btn.on{background:var(--accent-soft); color:var(--accent-ink); border-color:var(--accent);}
+  .po-row{display:flex; align-items:center; justify-content:space-between; gap:12px;
+    font-size:12.5px; padding:3px 0;}
+  .po-head + .po-row{margin-top:8px;}
+  .po-row.sub{color:var(--ink-3);}
+  .po-row.sum{border-top:1px solid var(--line); margin-top:3px; padding-top:5px;}
+  .po-row.total{border-top:1px solid var(--line-strong); margin-top:4px; padding-top:6px;
+    font-weight:700; color:var(--accent-ink);}
+  .po-note{margin-top:7px; font-size:12px; color:var(--ink-3); line-height:1.5;}
+
   /* 시간 자체 드롭다운 (오전/오후·시·분) */
   .time-sel{display:flex; align-items:center; gap:6px;}
   .time-sel select{flex:1; min-width:0;}
@@ -2152,18 +2167,72 @@ function openForm(table, row, defaults){
   var bg = el("<div class='modal-bg'><div class='modal'><div class='modal-h'><h3>"+(editing?"수정":"추가")+" · "+esc(TITLES[routeForTable(table)]||table)+"</h3><button class='icon-btn' id='mClose'>✕</button></div><div class='modal-b'>"+body+"</div><div class='modal-f'><button class='btn ghost' id='mCancel'>취소</button><button class='btn primary' id='mSave'>저장</button></div></div></div>");
   document.body.appendChild(bg);
 
-  /* 사업소득 지급 전용 보조 — 계약금액을 넣으면 3.3% 원천징수한 지급액을 미리 채워준다.
-     사용자가 지급액 칸을 한 번이라도 직접 고치면 그 뒤로는 덮어쓰지 않는다. */
+  /* 사업소득 지급 전용 보조 — 3.3% 원천징수 계산기.
+     계약금액을 넣으면 소득세·지방소득세 내역과 실지급액을 실시간으로 보여주고 지급액 칸을 채운다.
+     사용자가 지급액 칸을 한 번이라도 직접 고치면 그 뒤로는 덮어쓰지 않는다(수정 모드도 동일).
+     [역산] 을 켜면 반대로 실지급액을 입력해 계약금액을 되찾는다. */
   if (table === "payouts"){
     var poC = bg.querySelector("#f_contract"), poP = bg.querySelector("#f_paid");
     if (poC && poP){
       var poTouched = !!(row && row.paid != null && String(row.paid) !== "");
-      poP.addEventListener("input", function(){ poTouched = true; });
-      poC.addEventListener("input", function(){
-        if (poTouched) return;
-        var cv = Number(poC.value);
-        poP.value = (String(poC.value) === "" || !isFinite(cv)) ? "" : Math.round(cv * 0.967);
+      var poRev = false;
+      var poBox = document.createElement("div");
+      poBox.className = "po-calc";
+      if (poC.parentNode && poC.parentNode.parentNode){
+        poC.parentNode.parentNode.insertBefore(poBox, poC.parentNode.nextSibling);
+      }
+      var poLine = function(label, val, cls){
+        return "<div class='po-row"+(cls?" "+cls:"")+"'><span>"+label+"</span><span class='tnum'>"+val+"</span></div>";
+      };
+      var poBreakdown = function(t){
+        return poLine("계약금액", comma(t.contract)+"원") +
+          poLine("　소득세 3%", "− "+comma(t.incomeTax)+"원", "sub") +
+          poLine("　지방소득세 0.3%", "− "+comma(t.localTax)+"원", "sub") +
+          poLine("　원천징수 합계 3.3%", "− "+comma(t.withheld)+"원", "sub sum") +
+          poLine("실지급액", comma(t.paid)+"원", "total");
+      };
+      var poDraw = function(){
+        var html = "<div class='po-head'><span>3.3% 원천징수 계산기</span>"+
+          "<button type='button' class='btn sm ghost"+(poRev?" on":"")+"' id='poRevBtn'>역산</button></div>";
+        var note = "", t = null;
+        if (poRev){
+          var pv = Number(poP.value);
+          if (String(poP.value) !== "" && isFinite(pv) && pv > 0){
+            var r = poContractFor(pv);
+            if (r.exact){
+              poC.value = r.contract;
+              t = poTax(r.contract);
+            } else {
+              note = "입력하신 실지급액에 정확히 맞는 계약금액이 없습니다. 가장 가까운 금액: "+
+                comma(r.contract)+"원 (실지급 "+comma(r.paid)+"원)";
+            }
+          } else {
+            poC.value = "";
+            note = "실지급액을 입력하면 계약금액을 역산합니다.";
+          }
+        } else {
+          var cv = Number(poC.value);
+          if (String(poC.value) !== "" && isFinite(cv) && cv > 0){
+            t = poTax(cv);
+            if (!poTouched) poP.value = t.paid;
+          }
+        }
+        if (t) html += poBreakdown(t);
+        if (note) html += "<div class='po-note'>"+esc(note)+"</div>";
+        poBox.innerHTML = html;
+        var rb = poBox.querySelector("#poRevBtn");
+        if (rb) rb.onclick = function(){
+          poRev = !poRev;
+          poC.readOnly = poRev;
+          poDraw();
+        };
+      };
+      poP.addEventListener("input", function(){
+        if (poRev) poDraw();
+        else { poTouched = true; }
       });
+      poC.addEventListener("input", function(){ if (!poRev) poDraw(); });
+      poDraw();
     }
     var poB = bg.querySelector("#f_bank");
     if (poB && poB.parentNode){
@@ -2389,8 +2458,11 @@ function mountCalendar(container){
 }
 
 /* ============ 월별 매출·매입 집계 ============
-   매입(cost) = 단건 지출(expense) + 외주 인건비(payouts 의 실지급액 paid).
-   두 값은 서로 다른 테이블에서만 뽑으므로 중복 합산되지 않는다.
+   매입(cost) = 고정경비(우리 부담분) + 법인카드 + 단건 지출(expense) + 외주 인건비(payouts 의 실지급액).
+   네 갈래는 각각 다른 테이블(fixedcost / cards / expense / payouts)에서만 뽑으므로 중복 합산되지 않으며,
+   지출관리 화면의 expMonthlyRows() 와 같은 구성이라 두 화면의 매입 숫자가 일치한다.
+   고정경비는 반드시 fcMonthVal(부담률 적용)로만 더한다 — 청구액 전액을 쓰면 안 된다.
+   상계(offset)는 이미 고정경비로 잡힌 금액이라 넣지 않는다 — 넣으면 이중 계상이다.
    payouts 는 contract(계약금액)가 아니라 paid(실지급액)만 더한다 — 원천징수분은 통장에서 나가지 않는다. */
 function monthlyAgg(){
   var d = state.data, map = {};
@@ -2410,6 +2482,19 @@ function monthlyAgg(){
     var dt = parseDate(x.date); if(!dt) return;
     var k = dt.getFullYear()+"-"+pad2(dt.getMonth()+1);
     ensure(k).cost += payoutPaid(x);
+  });
+  /* 고정경비 — 연·월 매트릭스라 날짜가 없다. 값이 0인 달은 건너뛰어 빈 달이 그래프에 생기지 않게 한다. */
+  (d.fixedcost||[]).forEach(function(r){
+    var y = Number(r.year); if(!y) return;
+    for (var fm=1; fm<=12; fm++){
+      var fv = fcMonthVal(r, fm);
+      if (fv) ensure(y+"-"+pad2(fm)).cost += fv;
+    }
+  });
+  cardsAll().forEach(function(x){
+    var dt = parseDate(x.date); if(!dt) return;
+    var k = dt.getFullYear()+"-"+pad2(dt.getMonth()+1);
+    ensure(k).cost += Number(x.amount)||0;
   });
   var keys = Object.keys(map).sort();
   return keys.map(function(k){ return map[k]; });
@@ -3865,6 +3950,42 @@ var PAYOUT_PER = 25;
 function payoutsAll(){ return (state.data && state.data.payouts) || []; }
 function payoutContract(x){ return Number(x.contract)||0; }
 function payoutPaid(x){ return Number(x.paid)||0; }
+/* ---- 사업소득 3.3% 원천징수 계산 ----
+   소득세 3% + 지방소득세(소득세의 10%), 각 세액은 10원 미만 절사한다.
+   예: 계약 4,000,000 → 소득세 120,000 · 지방 12,000 · 원천징수 132,000 · 실지급 3,868,000 */
+function poTax(contract){
+  var c = Math.max(0, Math.floor(Number(contract)||0));
+  var incomeTax = Math.floor(c * 0.03 / 10) * 10;
+  var localTax  = Math.floor(incomeTax * 0.1 / 10) * 10;
+  var withheld  = incomeTax + localTax;
+  return { contract:c, incomeTax:incomeTax, localTax:localTax, withheld:withheld, paid:c - withheld };
+}
+/* 역산 — 실지급액에서 계약금액을 되찾는다.
+   Math.round(paid/0.967) 은 세액 절사 때문에 최대 20원쯤 어긋나므로 그 언저리를 1원씩 훑어
+   정식 계산식으로 되돌렸을 때 실지급액이 정확히 일치하는 계약금액을 고른다.
+   범위 안에 정확히 맞는 값이 없으면 exact:false 로 알리고 화면에서 안내한다. */
+var PO_REV_LIMIT = 30;
+function poContractFor(paid){
+  var p = Math.max(0, Math.floor(Number(paid)||0));
+  if (!p) return { contract:0, exact:true, paid:0 };
+  var base = Math.round(p / 0.967), d, c;
+  for (d=0; d<=PO_REV_LIMIT; d++){
+    c = base + d;
+    if (poTax(c).paid === p) return { contract:c, exact:true, paid:p };
+    c = base - d;
+    if (d && c >= 0 && poTax(c).paid === p) return { contract:c, exact:true, paid:p };
+  }
+  var best = Math.max(0, base), bestGap = Math.abs(poTax(best).paid - p);
+  for (d=1; d<=PO_REV_LIMIT; d++){
+    var cand = [base + d, base - d];
+    for (var i=0; i<cand.length; i++){
+      if (cand[i] < 0) continue;
+      var gap = Math.abs(poTax(cand[i]).paid - p);
+      if (gap < bestGap){ bestGap = gap; best = cand[i]; }
+    }
+  }
+  return { contract:best, exact:false, paid:poTax(best).paid };
+}
 /* 데이터에 실제로 있는 연도만 — 최신순 */
 function payoutYearList(){
   var ys = {};
