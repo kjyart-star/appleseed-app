@@ -2083,9 +2083,12 @@ var FIELDS = {
     ["share","부담률(%) — 비우면 100","number"],
     ["note","메모","text"] ],
   offset: [ ["date","날짜","date"], ["type","구분","select",["받을금액","현금수령"]],
-    ["counterpart","상대처","text"], ["amount","금액(원)","number"], ["memo","메모","text"] ]
+    ["counterpart","상대처","text"], ["amount","금액(원)","number"], ["memo","메모","text"] ],
+  payouts: [ ["date","지급일","date"], ["name","이름","text"], ["title","작업","text"],
+    ["project","프로젝트","text"], ["contract","계약금액(원)","number"], ["paid","지급액(원)","number"],
+    ["bank","입금계좌","text"], ["memo","메모","text"] ]
 };
-var NUMS = { amount:1, contract_amount:1, progress:1, year:1, payday:1, share:1,
+var NUMS = { amount:1, contract_amount:1, progress:1, year:1, payday:1, share:1, contract:1, paid:1,
   m1:1,m2:1,m3:1,m4:1,m5:1,m6:1,m7:1,m8:1,m9:1,m10:1,m11:1,m12:1 };
 var BOOLS = { done:1, all_day:1 };
 
@@ -2148,6 +2151,29 @@ function openForm(table, row, defaults){
   });
   var bg = el("<div class='modal-bg'><div class='modal'><div class='modal-h'><h3>"+(editing?"수정":"추가")+" · "+esc(TITLES[routeForTable(table)]||table)+"</h3><button class='icon-btn' id='mClose'>✕</button></div><div class='modal-b'>"+body+"</div><div class='modal-f'><button class='btn ghost' id='mCancel'>취소</button><button class='btn primary' id='mSave'>저장</button></div></div></div>");
   document.body.appendChild(bg);
+
+  /* 사업소득 지급 전용 보조 — 계약금액을 넣으면 3.3% 원천징수한 지급액을 미리 채워준다.
+     사용자가 지급액 칸을 한 번이라도 직접 고치면 그 뒤로는 덮어쓰지 않는다. */
+  if (table === "payouts"){
+    var poC = bg.querySelector("#f_contract"), poP = bg.querySelector("#f_paid");
+    if (poC && poP){
+      var poTouched = !!(row && row.paid != null && String(row.paid) !== "");
+      poP.addEventListener("input", function(){ poTouched = true; });
+      poC.addEventListener("input", function(){
+        if (poTouched) return;
+        var cv = Number(poC.value);
+        poP.value = (String(poC.value) === "" || !isFinite(cv)) ? "" : Math.round(cv * 0.967);
+      });
+    }
+    var poB = bg.querySelector("#f_bank");
+    if (poB && poB.parentNode){
+      var poHint = document.createElement("div");
+      poHint.className = "sec-note";
+      poHint.style.marginTop = "4px";
+      poHint.textContent = "은행명과 뒤 4자리만 입력하세요 (예: 저축 *8671)";
+      poB.parentNode.appendChild(poHint);
+    }
+  }
 
   /* 첨부파일 모달 이벤터 연동 */
   var attFormBox = bg.querySelector("#f_attachments_box");
@@ -2280,7 +2306,7 @@ function openForm(table, row, defaults){
     }
   };
 }
-function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses",cards:"expenses",offset:"expenses"}; return m[t]||t; }
+function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses",cards:"expenses",offset:"expenses",payouts:"expenses"}; return m[t]||t; }
 
 async function delRow(table, id){
   var ok = await confirmDlg("정말 삭제할까요? 되돌릴 수 없습니다.", "삭제", "삭제 확인");
@@ -3821,6 +3847,175 @@ function bindOffset(){
   C.querySelectorAll("[data-of-del]").forEach(function(b){ b.onclick=function(){ delRow("offset", b.getAttribute("data-of-del")); }; });
 }
 
+/* ---- 사업소득 지급 (외주 인건비) ----
+   계약금액(contract)에서 3.3%를 원천징수하고 남은 금액(paid)을 지급한다.
+   원천징수액은 저장하지 않고 contract − paid 로 계산한다(저장하면 값이 어긋날 수 있다).
+   ※ payouts 는 전용 테이블이며 expense·cards·fixedcost 어디에도 들어가지 않는다.
+      실제 통장에서 나가는 돈이므로 지출 그래프에는 "외주 인건비" 계열로 더한다. */
+var payoutYear = null, payoutPage = 1;
+var PAYOUT_PER = 25;
+function payoutsAll(){ return (state.data && state.data.payouts) || []; }
+function payoutContract(x){ return Number(x.contract)||0; }
+function payoutPaid(x){ return Number(x.paid)||0; }
+/* 데이터에 실제로 있는 연도만 — 최신순 */
+function payoutYearList(){
+  var ys = {};
+  payoutsAll().forEach(function(x){ var y=Number(String(x.date||"").slice(0,4)); if(y) ys[y]=1; });
+  return Object.keys(ys).map(Number).sort(function(a,b){ return b-a; });
+}
+function payoutActiveYear(){
+  var years = payoutYearList();
+  var cy = seoulNow().getFullYear();
+  if (!years.length) return cy;
+  if (payoutYear && years.indexOf(Number(payoutYear)) >= 0) return Number(payoutYear);
+  return years.indexOf(cy) >= 0 ? cy : years[0];
+}
+function payoutRowsForYear(year){
+  year = Number(year);
+  return payoutsAll().filter(function(x){ return Number(String(x.date||"").slice(0,4)) === year; })
+    .sort(function(a,b){ return String(b.date||"").localeCompare(String(a.date||"")); });
+}
+/* 해당 연도의 1~12월 계약·지급 합계 (지출 그래프도 이 값을 쓴다) */
+function payoutMonthly(year){
+  year = Number(year);
+  var rows = [], m;
+  for (m=1; m<=12; m++) rows.push({ m:m, contract:0, paid:0 });
+  payoutsAll().forEach(function(x){
+    var s = String(x.date||"");
+    if (Number(s.slice(0,4)) !== year) return;
+    var mi = Number(s.slice(5,7));
+    if (mi>=1 && mi<=12){ rows[mi-1].contract += payoutContract(x); rows[mi-1].paid += payoutPaid(x); }
+  });
+  return rows;
+}
+function payoutsInner(){
+  var years = payoutYearList();
+  var year = payoutActiveYear();
+  var list = payoutRowsForYear(year);
+  var sumC = 0, sumP = 0;
+  list.forEach(function(x){ sumC += payoutContract(x); sumP += payoutPaid(x); });
+
+  var h = "";
+  if (years.length > 1){
+    h += "<div class='proj-chips' style='padding:12px 20px 0'>";
+    years.forEach(function(y){
+      h += "<button class='proj-chip"+(y===year?" on":"")+"' data-po-y='"+y+"'>"+y+"년</button>";
+    });
+    h += "</div>";
+  }
+  h += "<div class='sum-strip'>"+
+    "<div class='sum-chip'>"+year+"년 계약금액<b class='tnum'>"+moneyMan(sumC)+"</b></div>"+
+    "<div class='sum-chip'>실지급액<b class='tnum'>"+moneyMan(sumP)+"</b></div>"+
+    "<div class='sum-chip'>원천징수(3.3%)<b class='tnum'>"+moneyMan(sumC-sumP)+"</b></div>"+
+    "<div class='sum-chip'>지급 건수<b class='tnum'>"+comma(list.length)+"건</b></div></div>";
+
+  if (!list.length){
+    return h + "<div class='empty'>"+year+"년 지급 내역이 없습니다. ‘+ 지급 등록’으로 외주 인건비를 기록하세요.</div>";
+  }
+
+  /* 월별 소계 */
+  var mrows = payoutMonthly(year);
+  var mBody = "";
+  mrows.forEach(function(r){
+    if (r.contract === 0 && r.paid === 0) return;
+    mBody += "<tr><td class='tnum'>"+r.m+"월</td>"+
+      "<td class='r tnum'>"+moneyWon(r.contract)+"</td>"+
+      "<td class='r tnum'>"+moneyWon(r.paid)+"</td>"+
+      "<td class='r tnum'>"+moneyWon(r.contract-r.paid)+"</td></tr>";
+  });
+  h += "<div class='tbl-scroll'><table><thead><tr><th>월</th><th class='r'>계약금액</th>"+
+    "<th class='r'>지급액</th><th class='r'>원천징수</th></tr></thead><tbody>"+mBody+
+    "</tbody><tfoot><tr><td style='font-weight:700'>합계</td>"+
+    "<td class='r tnum'>"+moneyWon(sumC)+"</td><td class='r tnum'>"+moneyWon(sumP)+"</td>"+
+    "<td class='r tnum'>"+moneyWon(sumC-sumP)+"</td></tr></tfoot></table></div>";
+
+  /* 지급 내역 (25건 초과 시 페이지 나눔) */
+  var pages = Math.max(1, Math.ceil(list.length / PAYOUT_PER));
+  payoutPage = Math.min(Math.max(1, Number(payoutPage)||1), pages);
+  var items = list.slice((payoutPage-1)*PAYOUT_PER, (payoutPage-1)*PAYOUT_PER + PAYOUT_PER);
+  var body = "";
+  items.forEach(function(x){
+    body += "<tr><td class='tnum'>"+esc(String(x.date||"").slice(0,10))+"</td>"+
+      "<td style='font-weight:700'>"+esc(x.name||"")+"</td>"+
+      "<td>"+esc(x.title||"")+(x.project ? "<div style='font-size:11px;color:var(--ink-3)'>"+esc(x.project)+"</div>" : "")+"</td>"+
+      "<td class='r tnum'>"+moneyWon(payoutContract(x))+"</td>"+
+      "<td class='r tnum'>"+moneyWon(payoutPaid(x))+"</td>"+
+      "<td class='r tnum' style='color:var(--ink-3)'>"+moneyWon(payoutContract(x)-payoutPaid(x))+"</td>"+
+      "<td>"+esc(x.bank||"")+"</td>"+
+      "<td>"+esc(x.memo||"")+"</td>"+
+      "<td class='r'><div class='row-actions'><button class='icon-btn' data-po-edit='"+esc(x.id)+"'>✎</button>"+
+        "<button class='icon-btn del' data-po-del='"+esc(x.id)+"'>🗑</button></div></td></tr>";
+  });
+  h += "<div class='tbl-scroll'><table><thead><tr><th>날짜</th><th>이름</th><th>작업</th>"+
+    "<th class='r'>계약금액</th><th class='r'>지급액</th><th class='r'>원천징수</th>"+
+    "<th>입금계좌</th><th>메모</th><th class='r'>관리</th></tr></thead><tbody>"+body+"</tbody></table></div>";
+  if (pages > 1){
+    var from = Math.max(1, payoutPage - 2);
+    var to = Math.min(pages, from + 4);
+    from = Math.max(1, to - 4);
+    h += "<div class='proj-chips bd-pager'><button class='proj-chip' data-po-page='1'>« 처음</button>";
+    for (var pn = from; pn <= to; pn++){
+      h += "<button class='proj-chip"+(pn===payoutPage?" on":"")+"' data-po-page='"+pn+"'>"+pn+"</button>";
+    }
+    h += "<button class='proj-chip' data-po-page='"+pages+"'>끝 »</button></div>";
+  }
+
+  /* 사람별 집계 */
+  var byName = {}, order = [];
+  list.forEach(function(x){
+    var n = String(x.name||"").trim() || "미지정";
+    if (!byName[n]){ byName[n] = { cnt:0, c:0, p:0 }; order.push(n); }
+    byName[n].cnt++; byName[n].c += payoutContract(x); byName[n].p += payoutPaid(x);
+  });
+  order.sort(function(a,b){ return byName[b].p - byName[a].p; });
+  var pBody = "";
+  order.forEach(function(n){
+    pBody += "<tr><td style='font-weight:700'>"+esc(n)+"</td>"+
+      "<td class='r tnum'>"+byName[n].cnt+"건</td>"+
+      "<td class='r tnum'>"+moneyWon(byName[n].c)+"</td>"+
+      "<td class='r tnum'>"+moneyWon(byName[n].p)+"</td></tr>";
+  });
+  h += "<div class='sec-note' style='padding:16px 20px 0'>사람별 집계 ("+year+"년)</div>"+
+    "<div class='tbl-scroll'><table><thead><tr><th>이름</th><th class='r'>건수</th>"+
+    "<th class='r'>계약합계</th><th class='r'>지급합계</th></tr></thead><tbody>"+pBody+"</tbody></table></div>";
+  return h;
+}
+function payoutsSection(){
+  return "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>외주 인건비 · 사업소득</div><h3>사업소득 지급</h3>"+
+      "<div class='sec-note' style='margin-top:4px'>계약금액에서 3.3%를 원천징수하고 남은 금액을 지급합니다. "+
+      "원천징수액은 따로 저장하지 않고 <b>계약금액 − 지급액</b>으로 계산합니다. "+
+      "이 표의 지급액은 위 지출 그래프에 ‘외주 인건비’로 반영되며, 다른 지출 표(고정경비·법인카드·단건 지출)와 겹치지 않습니다.</div></div>"+
+      "<button class='btn sm' data-po-add>+ 지급 등록</button></div>"+
+    "<div data-po-body>"+payoutsInner()+"</div></section>";
+}
+function drawPayoutsBody(){
+  var box = C.querySelector("[data-po-body]");
+  if (!box) return;
+  box.innerHTML = payoutsInner();
+  bindPayoutsBody();
+  applyMask();
+}
+function bindPayoutsBody(){
+  C.querySelectorAll("[data-po-y]").forEach(function(b){
+    b.onclick = function(){ payoutYear = Number(b.getAttribute("data-po-y")); payoutPage = 1; drawPayoutsBody(); };
+  });
+  C.querySelectorAll("[data-po-page]").forEach(function(b){
+    b.onclick = function(){ payoutPage = Number(b.getAttribute("data-po-page")); drawPayoutsBody(); };
+  });
+  C.querySelectorAll("[data-po-edit]").forEach(function(b){
+    b.onclick = function(){ openForm("payouts", findById(payoutsAll(), b.getAttribute("data-po-edit"))); };
+  });
+  C.querySelectorAll("[data-po-del]").forEach(function(b){
+    b.onclick = function(){ delRow("payouts", b.getAttribute("data-po-del")); };
+  });
+}
+function bindPayouts(){
+  var add = C.querySelector("[data-po-add]");
+  if (add) add.onclick = function(){ openForm("payouts", null, { date: ymd(seoulNow()) }); };
+  bindPayoutsBody();
+}
+
 /* ---- 법인카드 (승인문자·카드명세서 자동수집 + 수동입력) ---- */
 var cardsPage = 1, cardsQ = "";
 var CARDS_PER = 20;
@@ -4193,8 +4388,8 @@ function subsSummarySection(){
   return h;
 }
 
-/* ---- 이번 달 총 지출 = 고정경비 + 법인카드 + 개별지출 ----
-   세 값은 서로 다른 테이블(fixedcost / cards / expense)에서만 뽑으므로 겹치지 않는다.
+/* ---- 이번 달 총 지출 = 고정경비 + 법인카드 + 개별지출 + 외주 인건비 ----
+   네 값은 서로 다른 테이블(fixedcost / cards / expense / payouts)에서만 뽑으므로 겹치지 않는다.
    AI 구독료는 법인카드 결제분에 이미 포함되어 있어 따로 더하지 않는다. */
 function expenseTotalSection(){
   var now = seoulNow(), curY = now.getFullYear(), curM = now.getMonth()+1, curYm = ymKey(now);
@@ -4205,35 +4400,42 @@ function expenseTotalSection(){
   var expThis = (state.data.expense||[]).reduce(function(a,x){
     return a + (String(x.date||"").slice(0,7)===curYm ? (Number(x.amount)||0) : 0);
   }, 0);
-  var total = fixedThis + cardThis + expThis;
+  var payoutThis = payoutsAll().reduce(function(a,x){
+    return a + (String(x.date||"").slice(0,7)===curYm ? payoutPaid(x) : 0);
+  }, 0);
+  var total = fixedThis + cardThis + expThis + payoutThis;
   return "<section class='panel'>"+
     "<div class='sec-head'><div><div class='eyebrow'>"+curY+"년 "+curM+"월 총 지출</div>"+
       "<h3>"+moneyWon(total)+"</h3>"+
-      "<div class='sec-note' style='margin-top:4px'>고정경비(부담분) "+comma(fixedThis)+"원 + 법인카드 "+comma(cardThis)+"원 + 개별지출 "+comma(expThis)+"원 · "+
-      "세 항목은 각각 다른 표에 기록되어 중복 합산되지 않습니다. AI 구독료는 법인카드 결제분에 포함되어 따로 더하지 않습니다.</div></div>"+
+      "<div class='sec-note' style='margin-top:4px'>고정경비(부담분) "+comma(fixedThis)+"원 + 법인카드 "+comma(cardThis)+"원 + 개별지출 "+comma(expThis)+"원 + 외주 인건비 "+comma(payoutThis)+"원 · "+
+      "네 항목은 각각 다른 표에 기록되어 중복 합산되지 않습니다. AI 구독료는 법인카드 결제분에 포함되어 따로 더하지 않습니다.</div></div>"+
     "<div class='sum-strip' style='padding:0'>"+
       "<div class='sum-chip'>고정경비<b class='tnum'>"+moneyMan(fixedThis)+"</b></div>"+
       "<div class='sum-chip'>법인카드<b class='tnum'>"+moneyMan(cardThis)+"</b></div>"+
-      "<div class='sum-chip'>개별지출<b class='tnum'>"+moneyMan(expThis)+"</b></div></div>"+
+      "<div class='sum-chip'>개별지출<b class='tnum'>"+moneyMan(expThis)+"</b></div>"+
+      "<div class='sum-chip'>외주 인건비<b class='tnum'>"+moneyMan(payoutThis)+"</b></div></div>"+
     "</div></section>";
 }
 /* ---- 지출 현황 그래프 ----
-   지출은 세 갈래(fixedcost / cards / expense)로 각각 다른 테이블에서만 뽑으므로 서로 겹치지 않는다.
+   지출은 네 갈래(fixedcost / cards / expense / payouts)로 각각 다른 테이블에서만 뽑으므로 서로 겹치지 않는다.
    AI 구독료는 법인카드 결제분에 이미 포함되어 있어 따로 더하지 않는다.
+   상계(offset)는 고정경비로 이미 잡힌 금액이라 여기에 넣지 않는다.
+   외주 인건비(payouts)는 실지급액(paid)만 더한다 — 원천징수분은 우리 통장에서 나가지 않는다.
    고정경비는 반드시 fcMonthVal(부담률 적용)로만 합산한다 — 청구액 전액을 쓰면 안 된다. */
 var expChartMode = "month";   /* "month" | "year" */
 var expChartYear = null;
 var EXP_SERIES = [
-  { key:"fixed", name:"고정경비(부담분)", color:"var(--vfx)" },
-  { key:"card",  name:"법인카드",         color:"var(--cost)" },
-  { key:"exp",   name:"단건 지출",        color:"var(--aiedu)" }
+  { key:"fixed",  name:"고정경비(부담분)", color:"var(--vfx)" },
+  { key:"card",   name:"법인카드",         color:"var(--cost)" },
+  { key:"exp",    name:"단건 지출",        color:"var(--aiedu)" },
+  { key:"payout", name:"외주 인건비",       color:"var(--mk-deadline)" }
 ];
 /* 데이터가 존재하는 연도 + 올해 */
 function expYearList(){
   var ys = {};
   (state.data.fixedcost||[]).forEach(function(r){ var y=Number(r.year); if(y) ys[y]=1; });
   function scan(list){ (list||[]).forEach(function(x){ var y=Number(String(x.date||"").slice(0,4)); if(y) ys[y]=1; }); }
-  scan(cardsAll()); scan(state.data.expense);
+  scan(cardsAll()); scan(state.data.expense); scan(payoutsAll());
   var out = Object.keys(ys).map(Number);
   var cy = seoulNow().getFullYear();
   if (out.indexOf(cy)<0) out.push(cy);
@@ -4244,11 +4446,12 @@ function expYearList(){
 function expMonthlyRows(year){
   year = Number(year);
   var rows = [], m;
-  for (m=1; m<=12; m++) rows.push({ label:m+"월", key:year+"-"+pad2(m), fixed:0, card:0, exp:0 });
+  for (m=1; m<=12; m++) rows.push({ label:m+"월", key:year+"-"+pad2(m), fixed:0, card:0, exp:0, payout:0 });
   (state.data.fixedcost||[]).forEach(function(r){
     if (Number(r.year)!==year) return;
     for (var k=1; k<=12; k++) rows[k-1].fixed += fcMonthVal(r, k);   /* 부담률 적용분만 */
   });
+  payoutMonthly(year).forEach(function(p){ rows[p.m-1].payout += p.paid; });   /* 실지급액만 */
   function addDated(list, field){
     (list||[]).forEach(function(x){
       var s = String(x.date||"");
@@ -4265,13 +4468,13 @@ function expMonthlyRows(year){
 function expYearRows(){
   var out = [];
   expYearList().forEach(function(y){
-    var t = { label:y+"년", key:String(y), fixed:0, card:0, exp:0 };
-    expMonthlyRows(y).forEach(function(r){ t.fixed+=r.fixed; t.card+=r.card; t.exp+=r.exp; });
-    if (t.fixed+t.card+t.exp > 0) out.push(t);
+    var t = { label:y+"년", key:String(y), fixed:0, card:0, exp:0, payout:0 };
+    expMonthlyRows(y).forEach(function(r){ t.fixed+=r.fixed; t.card+=r.card; t.exp+=r.exp; t.payout+=r.payout; });
+    if (expRowTotal(t) > 0) out.push(t);
   });
   return out;
 }
-function expRowTotal(r){ return r.fixed + r.card + r.exp; }
+function expRowTotal(r){ return r.fixed + r.card + r.exp + r.payout; }
 /* 누적 막대 SVG (만원 단위). curKey 와 같은 key 의 막대는 테두리로 강조 */
 function expStackChartSVG(rows, curKey){
   var W = Math.max(720, rows.length*74), H=300, padL=54, padR=16, padT=22, padB=42;
@@ -4333,9 +4536,9 @@ function expChartInner(){
   var nz = mrows.filter(function(r){ return expRowTotal(r) > 0; });
   var avg = nz.length ? Math.round(nz.reduce(function(a,r){ return a+expRowTotal(r); },0)/nz.length) : 0;
 
-  var tot = { fixed:0, card:0, exp:0 };
-  rows.forEach(function(r){ tot.fixed+=r.fixed; tot.card+=r.card; tot.exp+=r.exp; });
-  var grand = tot.fixed + tot.card + tot.exp;
+  var tot = { fixed:0, card:0, exp:0, payout:0 };
+  rows.forEach(function(r){ tot.fixed+=r.fixed; tot.card+=r.card; tot.exp+=r.exp; tot.payout+=r.payout; });
+  var grand = expRowTotal(tot);
 
   /* 이번 달 / 지난 달은 실제 현재 월 기준(연도 선택과 무관) */
   function monthTotal(y, m){ return expRowTotal(expMonthlyRows(y)[m-1]); }
@@ -4365,7 +4568,7 @@ function expChartInner(){
     "<div class='sum-chip'>월 평균 ("+nz.length+"개월)<b class='tnum'>"+moneyMan(avg)+"</b></div></div>";
 
   if (!rows.length || grand<=0){
-    h += "<div class='empty'>표시할 지출 데이터가 없습니다."+(isYear?"":" 고정경비·법인카드·단건 지출을 먼저 입력하세요.")+"</div>";
+    h += "<div class='empty'>표시할 지출 데이터가 없습니다."+(isYear?"":" 고정경비·법인카드·단건 지출·외주 인건비를 먼저 입력하세요.")+"</div>";
     return h;
   }
 
@@ -4380,8 +4583,8 @@ function expChartInner(){
 function expenseChartSection(){
   return "<section class='panel'>"+
     "<div class='sec-head'><div><div class='eyebrow'>지출 현황</div><h3>지출 추이</h3>"+
-      "<div class='sec-note' style='margin-top:4px'>고정경비(부담률 적용한 우리 부담분) · 법인카드 · 단건 지출을 합친 실지출입니다. "+
-      "세 갈래는 각각 다른 표에서만 뽑아 중복 합산되지 않습니다. 단위: 만원</div></div></div>"+
+      "<div class='sec-note' style='margin-top:4px'>고정경비(부담률 적용한 우리 부담분) · 법인카드 · 단건 지출 · 외주 인건비(실지급액)를 합친 실지출입니다. "+
+      "네 갈래는 각각 다른 표에서만 뽑아 중복 합산되지 않습니다. 단위: 만원</div></div></div>"+
     "<div class='chart-body' data-exp-chart>"+expChartInner()+"</div></section>";
 }
 function bindExpenseChart(){
@@ -4406,6 +4609,7 @@ function renderExpenses(){
   html += expenseTotalSection();
   html += fixedCostSection();
   html += offsetSection();
+  html += payoutsSection();
   html += cardsSection();
   html += subsSummarySection();
   var chips = "<div class='sum-chip'>전체 지출<b class='tnum'>"+moneyMan(sum)+"</b></div>";
@@ -4422,6 +4626,7 @@ function renderExpenses(){
   bindExpenseChart();
   bindFixedCost();
   bindOffset();
+  bindPayouts();
   bindCards();
   var sgo = C.querySelector("[data-subs-go]");
   if (sgo) sgo.onclick = function(){ location.hash = "#subs"; };
