@@ -1605,7 +1605,7 @@ var MENU = [
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
   { cap:"커뮤니케이션", items:[ ["namecard","🪪","명함관리",1], ["newsletter","📰","뉴스레터",1] ] },
   { cap:"자료·리포트", items:[ ["contests","🏆","AI 공모전",0], ["festivals","🎥","AI 영화제",0], ["gov","🏛️","AI 지원사업",0], ["newsrep","📰","뉴스리포트",0], ["youtube","▶️","AI 유튜브",0], ["library","📚","자료실",0], ["reports","📑","리포트",0] ] },
-  { cap:"시스템", items:[ ["company","🏢","회사정보",0], ["cert","🏷️","재직증명서",1] ] }
+  { cap:"시스템", items:[ ["company","🏢","회사정보",0], ["taxdue","🧾","세무일정",0], ["cert","🏷️","재직증명서",1] ] }
 ];
 var TITLES = {};
 MENU.forEach(function(g){ g.items.forEach(function(it){ TITLES[it[0]] = it[2]; }); });
@@ -2107,10 +2107,18 @@ var FIELDS = {
   payouts: [ ["date","지급일","date"], ["name","이름","text"], ["title","작업","text"],
     ["project","프로젝트","text"], ["contract","계약금액(원)","number"], ["paid","지급액(원)","number"],
     ["bank","입금계좌","text"], ["rrn","신고용 식별번호","text"], ["account","입금계좌 전체","text"],
-    ["memo","메모","text"] ]
+    ["memo","메모","text"] ],
+  payroll: [ ["ym","기준월","text"], ["emp_code","사원코드","text"], ["name","이름","text"], ["position","직급","text"],
+    ["base_pay","기본급(원)","number"], ["np","국민연금(원)","number"], ["hi","건강보험(원)","number"],
+    ["ltc","장기요양(원)","number"], ["it","소득세(원)","number"], ["lit","지방소득세(원)","number"],
+    ["adj","연말정산 조정(원)","number"], ["deduct_total","공제계(원)","number"], ["net_pay","차인지급액(원)","number"],
+    ["memo","메모","text"], ["status","지급상태","select",["미지급","지급완료"]], ["paid_date","지급일","date"] ],
+  taxdue: [ ["year","연도","number"], ["kind","구분","text"], ["title","내용","text"],
+    ["due_date","기한","date"], ["period","대상기간","text"], ["done","완료","checkbox"], ["memo","메모","text"] ]
 };
 var NUMS = { amount:1, contract_amount:1, progress:1, year:1, payday:1, share:1, contract:1, paid:1,
-  m1:1,m2:1,m3:1,m4:1,m5:1,m6:1,m7:1,m8:1,m9:1,m10:1,m11:1,m12:1, sort:1, premium:1 };
+  m1:1,m2:1,m3:1,m4:1,m5:1,m6:1,m7:1,m8:1,m9:1,m10:1,m11:1,m12:1, sort:1, premium:1,
+  base_pay:1, np:1, hi:1, ltc:1, it:1, lit:1, adj:1, deduct_total:1, net_pay:1 };
 var BOOLS = { done:1, all_day:1 };
 
 function openForm(table, row, defaults){
@@ -2250,6 +2258,45 @@ function openForm(table, row, defaults){
     }
   }
 
+  /* 급여대장 전용 보조 — 공제계·차인지급액 자동계산.
+     공제계 = 국민연금 + 건강보험 + 장기요양 + 소득세 + 지방소득세 + 연말정산 조정(환급이면 음수),
+     차인지급액 = 기본급 − 공제계.
+     사용자가 공제계나 차인지급액 칸을 직접 고치면 그 칸은 그 뒤로 덮어쓰지 않는다. */
+  if (table === "payroll"){
+    var prIds = ["np","hi","ltc","it","lit","adj","base_pay"];
+    var prDT = bg.querySelector("#f_deduct_total"), prNP = bg.querySelector("#f_net_pay");
+    if (prDT && prNP){
+      /* 폼을 연 직후에는 계산하지 않는다 — 저장된 값을 멋대로 덮어쓰지 않기 위해서다.
+         공제 항목을 하나라도 고치면 그때부터 다시 계산한다. */
+      var prDTTouched = false, prNPTouched = false;
+      var prNum = function(id){
+        var elx = bg.querySelector("#f_"+id);
+        var v = elx ? Number(elx.value) : 0;
+        return isFinite(v) ? v : 0;
+      };
+      var prCalc = function(){
+        var dt = prNum("np") + prNum("hi") + prNum("ltc") + prNum("it") + prNum("lit") + prNum("adj");
+        if (!prDTTouched) prDT.value = dt;
+        var dtUsed = prDTTouched ? (isFinite(Number(prDT.value)) ? Number(prDT.value) : 0) : dt;
+        if (!prNPTouched) prNP.value = prNum("base_pay") - dtUsed;
+      };
+      prIds.forEach(function(id){
+        var elx = bg.querySelector("#f_"+id);
+        if (elx) elx.addEventListener("input", prCalc);
+      });
+      prDT.addEventListener("input", function(){ prDTTouched = true; prCalc(); });
+      prNP.addEventListener("input", function(){ prNPTouched = true; });
+    }
+    var prYm = bg.querySelector("#f_ym");
+    if (prYm && prYm.parentNode){
+      var prHint = document.createElement("div");
+      prHint.className = "sec-note";
+      prHint.style.marginTop = "4px";
+      prHint.textContent = "기준월은 YYYY-MM 형식으로 입력하세요 (예: 2026-02)";
+      prYm.parentNode.appendChild(prHint);
+    }
+  }
+
   /* 첨부파일 모달 이벤터 연동 */
   var attFormBox = bg.querySelector("#f_attachments_box");
   var attFileInput = bg.querySelector("#mAttFileInput");
@@ -2381,7 +2428,7 @@ function openForm(table, row, defaults){
     }
   };
 }
-function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses",cards:"expenses",offset:"expenses",payouts:"expenses"}; return m[t]||t; }
+function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses",cards:"expenses",offset:"expenses",payouts:"expenses",payroll:"expenses",taxdue:"taxdue"}; return m[t]||t; }
 
 async function delRow(table, id){
   var ok = await confirmDlg("정말 삭제할까요? 되돌릴 수 없습니다.", "삭제", "삭제 확인");
@@ -2464,12 +2511,14 @@ function mountCalendar(container){
 }
 
 /* ============ 월별 매출·매입 집계 ============
-   매입(cost) = 고정경비(우리 부담분) + 법인카드 + 단건 지출(expense) + 외주 인건비(payouts 의 실지급액).
-   네 갈래는 각각 다른 테이블(fixedcost / cards / expense / payouts)에서만 뽑으므로 중복 합산되지 않으며,
+   매입(cost) = 고정경비(우리 부담분) + 법인카드 + 단건 지출(expense) + 외주 인건비(payouts 의 실지급액) + 급여(payroll 의 차인지급액).
+   다섯 갈래는 각각 다른 테이블(fixedcost / cards / expense / payouts / payroll)에서만 뽑으므로 중복 합산되지 않으며,
    지출관리 화면의 expMonthlyRows() 와 같은 구성이라 두 화면의 매입 숫자가 일치한다.
    고정경비는 반드시 fcMonthVal(부담률 적용)로만 더한다 — 청구액 전액을 쓰면 안 된다.
    상계(offset)는 이미 고정경비로 잡힌 금액이라 넣지 않는다 — 넣으면 이중 계상이다.
-   payouts 는 contract(계약금액)가 아니라 paid(실지급액)만 더한다 — 원천징수분은 통장에서 나가지 않는다. */
+   payouts 는 contract(계약금액)가 아니라 paid(실지급액)만 더한다 — 원천징수분은 통장에서 나가지 않는다.
+   payroll 은 payrollSpend() 로만 더한다 — 발행됐어도 실제 지급 전이면 통장에서 나가지 않았으므로 지출이 아니며(미지급금=부채),
+   지급완료분도 base_pay 가 아니라 net_pay 만 쓴다(4대보험·원천세는 이미 expense 에 자동이체로 잡혀 있어 기본급을 쓰면 이중 계상). */
 function monthlyAgg(){
   var d = state.data, map = {};
   function ensure(k){ if(!map[k]) map[k]={key:k, done:0, wait:0, cost:0}; return map[k]; }
@@ -2488,6 +2537,14 @@ function monthlyAgg(){
     var dt = parseDate(x.date); if(!dt) return;
     var k = dt.getFullYear()+"-"+pad2(dt.getMonth()+1);
     ensure(k).cost += payoutPaid(x);
+  });
+  /* 급여 — ym 이 이미 "YYYY-MM" 이라 그대로 키로 쓴다.
+     지급완료분의 차인지급액만 더한다(미지급은 통장에서 나가지 않았고, 기본급은 이중 계상). */
+  (d.payroll||[]).forEach(function(x){
+    var k = String(x.ym||"").slice(0,7);
+    if (!/^\d{4}-\d{2}$/.test(k)) return;
+    var pv = payrollSpend(x);
+    if (pv) ensure(k).cost += pv;   /* 미지급(0)으로 빈 달이 그래프에 생기지 않게 — 고정경비와 같은 처리 */
   });
   /* 고정경비 — 연·월 매트릭스라 날짜가 없다. 값이 0인 달은 건너뛰어 빈 달이 그래프에 생기지 않게 한다. */
   (d.fixedcost||[]).forEach(function(r){
@@ -3537,6 +3594,8 @@ function mountProjectWorkspace(container){
       return { s:s, days:days };
     }).filter(function(x){ return x.days!=null && x.days>=0 && x.days<=10; })
       .sort(function(a,b){ return a.days-b.days; });
+    /* 세무 기한 임박(7일 이내) — 화면과 같은 판정(taxdueUpcoming)을 쓴다 */
+    var taxSoon = taxdueUpcoming(7);
     var needEl = railEl.querySelector("[data-need]");
     needEl.innerHTML = "<div class='proj-need'>"+
       needRow("deposits","🏦","미수금", arWait.length, moneyMan(arSum))+
@@ -3544,6 +3603,7 @@ function mountProjectWorkspace(container){
       needRow("todos","⏰","지연 할일", lateTodos.length, "")+
       needRow("impending","📌","마감 임박(14일)", impending.length, "")+
       needRow("subs","🔁","AI 구독 갱신(10일)", subsDue.length, subsDue.length ? ("D-"+subsDue[0].days) : "")+
+      needRow("taxdue","🧾","세무 기한(7일)", taxSoon.length, taxSoon.length ? ("D-"+taxSoon[0].days) : "")+
       "</div>";
     needEl.querySelectorAll("[data-need-go]").forEach(function(b){
       b.onclick = function(){ var t=b.getAttribute("data-need-go");
@@ -3551,6 +3611,7 @@ function mountProjectWorkspace(container){
         else if (t==="revenue") location.hash="#revenue";
         else if (t==="todos") location.hash="#todos";
         else if (t==="subs") location.hash="#subs";
+        else if (t==="taxdue") location.hash="#taxdue";
         else if (t==="impending" && impending.length){ projSelId = impending[0].id; localStorage.setItem("appleseed_proj_sel", projSelId); drawList(); drawDetail(); } };
     });
     /* 마감 임박 공모전(7일 이내, 국내+해외) — 이미 받아 둔 세션 캐시만 쓴다.
@@ -4161,6 +4222,163 @@ function bindPayouts(){
   bindPayoutsBody();
 }
 
+/* ---- 급여대장 (대표 급여) ----
+   기준월(ym)은 "YYYY-MM" 문자열이며 한 달에 한 행이 원칙이다.
+   공제계 = 국민연금 + 건강보험 + 장기요양 + 소득세 + 지방소득세 + 연말정산 조정(환급이면 음수),
+   차인지급액 = 기본급 − 공제계.
+   ※ 지출 계상 규칙 — payrollSpend() 한 곳에서만 판정한다.
+      급여명세서가 발행됐어도 실제 지급 전(status ≠ "지급완료")이면 통장에서 나가지 않았으므로 지출이 아니다.
+      회계상으로는 미지급금(부채)이며, 지출 합계·그래프·영업이익 어디에도 넣지 않는다.
+      지급완료 행도 차인지급액(net_pay)만 더한다 — 4대보험·원천세는 이미 expense 에 자동이체로 잡혀 있어
+      기본급을 쓰면 같은 돈을 두 번 세게 된다. base_pay 는 어떤 지출 경로에도 쓰지 않는다.
+      월 귀속은 지급일(paid_date)이 아니라 기준월(ym)을 따른다. */
+var payrollYear = null;
+function payrollAll(){ return (state.data && state.data.payroll) || []; }
+function payrollNum(x, k){ return Number(x && x[k])||0; }
+/* status 가 비어 있으면 미지급으로 본다 — 지급 사실이 확인된 행만 지출로 잡기 위해서다 */
+function payrollIsPaid(x){ return String((x && x.status) || "") === "지급완료"; }
+function payrollSpend(x){ return payrollIsPaid(x) ? (Number(x && x.net_pay)||0) : 0; }
+/* 데이터에 실제로 있는 연도만 — 최신순 */
+function payrollYearList(){
+  var ys = {};
+  payrollAll().forEach(function(x){ var y=Number(String(x.ym||"").slice(0,4)); if(y) ys[y]=1; });
+  return Object.keys(ys).map(Number).sort(function(a,b){ return b-a; });
+}
+function payrollActiveYear(){
+  var years = payrollYearList();
+  var cy = seoulNow().getFullYear();
+  if (!years.length) return cy;
+  if (payrollYear && years.indexOf(Number(payrollYear)) >= 0) return Number(payrollYear);
+  return years.indexOf(cy) >= 0 ? cy : years[0];
+}
+/* 해당 연도의 1~12월 — 등록된 달만 행이 들어가고 나머지는 null */
+function payrollByMonth(year){
+  year = Number(year);
+  var rows = [], m;
+  for (m=1; m<=12; m++) rows.push(null);
+  payrollAll().forEach(function(x){
+    var s = String(x.ym||"");
+    if (Number(s.slice(0,4)) !== year) return;
+    var mi = Number(s.slice(5,7));
+    if (mi>=1 && mi<=12 && !rows[mi-1]) rows[mi-1] = x;
+  });
+  return rows;
+}
+function payrollInner(){
+  var years = payrollYearList();
+  var year = payrollActiveYear();
+  var rows = payrollByMonth(year);
+  /* 세 합계 모두 데이터에서 계산한다 — 발생(전체) · 실지급(지급완료) · 미지급 누계 */
+  var sumBase = 0, sumDed = 0, sumGross = 0, sumPaid = 0, sumUnpaid = 0, cnt = 0;
+  var unpaidYms = [];
+  rows.forEach(function(x, i){
+    if (!x) return;
+    cnt++;
+    sumBase   += payrollNum(x, "base_pay");
+    sumDed    += payrollNum(x, "deduct_total");
+    sumGross  += payrollNum(x, "net_pay");
+    if (payrollIsPaid(x)) sumPaid += payrollNum(x, "net_pay");
+    else { sumUnpaid += payrollNum(x, "net_pay"); unpaidYms.push(year+"-"+pad2(i+1)); }
+  });
+
+  var h = "";
+  if (years.length > 1){
+    h += "<div class='proj-chips' style='padding:12px 20px 0'>";
+    years.forEach(function(y){
+      h += "<button class='proj-chip"+(y===year?" on":"")+"' data-pr-y='"+y+"'>"+y+"년</button>";
+    });
+    h += "</div>";
+  }
+  h += "<div class='sum-strip'>"+
+    "<div class='sum-chip'>"+year+"년 발생 급여 합계<b class='tnum'>"+moneyMan(sumGross)+"</b></div>"+
+    "<div class='sum-chip'>실지급 합계<b class='tnum'>"+moneyMan(sumPaid)+"</b></div>"+
+    "<div class='sum-chip' style='border-color:var(--urgent); background:var(--urgent-soft)'>미지급 누계"+
+      "<b class='tnum' style='color:var(--urgent); font-size:22px'>"+moneyWon(sumUnpaid)+"</b>"+
+      "<span style='display:block; font-size:11px; color:var(--ink-2); margin-top:2px'>"+
+        (unpaidYms.length ? esc(unpaidYms.join(" · "))+" ("+unpaidYms.length+"개월분) · 4대보험은 정상 납부 중"
+                          : "미지급 급여가 없습니다")+"</span></div>"+
+    "<div class='sum-chip'>기본급 합계<b class='tnum'>"+moneyMan(sumBase)+"</b></div>"+
+    "<div class='sum-chip'>공제 합계<b class='tnum'>"+moneyMan(sumDed)+"</b></div></div>";
+
+  if (!cnt){
+    return h + "<div class='empty'>"+year+"년 급여 기록이 없습니다. ‘+ 급여 등록’으로 월별 급여를 기록하세요.</div>";
+  }
+
+  if (unpaidYms.length){
+    h += "<div class='sec-note' style='padding:14px 20px 0; color:var(--urgent)'>"+
+      "발행된 급여 중 실지급되지 않은 금액입니다. 회계상 미지급금(부채)이며 지출 합계에는 포함하지 않습니다.</div>";
+  }
+
+  var none = "<span style='color:var(--ink-3)'>미등록</span>";
+  var paidChip = "<span class='mini-tag' style='color:var(--ink-3); background:var(--surface-3)'>지급완료</span>";
+  var unpaidChip = "<span class='chip wait'>미지급</span>";
+  var body = "";
+  rows.forEach(function(x, i){
+    if (!x){
+      body += "<tr><td class='tnum'>"+(i+1)+"월</td><td colspan='10'>"+none+"</td><td></td></tr>";
+      return;
+    }
+    body += "<tr><td class='tnum'>"+(i+1)+"월</td>"+
+      "<td class='r tnum'>"+moneyWon(payrollNum(x,"base_pay"))+"</td>"+
+      "<td class='r tnum'>"+moneyWon(payrollNum(x,"np"))+"</td>"+
+      "<td class='r tnum'>"+moneyWon(payrollNum(x,"hi"))+"</td>"+
+      "<td class='r tnum'>"+moneyWon(payrollNum(x,"ltc"))+"</td>"+
+      "<td class='r tnum'>"+moneyWon(payrollNum(x,"it"))+"</td>"+
+      "<td class='r tnum'>"+moneyWon(payrollNum(x,"lit"))+"</td>"+
+      "<td class='r tnum'>"+moneyWon(payrollNum(x,"adj"))+"</td>"+
+      "<td class='r tnum'>"+moneyWon(payrollNum(x,"deduct_total"))+"</td>"+
+      "<td class='r tnum' style='font-weight:700'>"+moneyWon(payrollNum(x,"net_pay"))+"</td>"+
+      "<td>"+(payrollIsPaid(x) ? paidChip +
+        (x.paid_date ? "<div style='font-size:11px;color:var(--ink-3)'>"+esc(String(x.paid_date).slice(0,10))+"</div>" : "")
+        : unpaidChip)+"</td>"+
+      "<td class='r'><div class='row-actions'><button class='icon-btn' data-pr-edit='"+esc(x.id)+"'>✎</button>"+
+        "<button class='icon-btn del' data-pr-del='"+esc(x.id)+"'>🗑</button></div></td></tr>";
+  });
+  h += "<div class='tbl-scroll'><table><thead><tr><th>월</th><th class='r'>기본급</th>"+
+    "<th class='r'>국민연금</th><th class='r'>건강보험</th><th class='r'>장기요양</th>"+
+    "<th class='r'>소득세</th><th class='r'>지방소득세</th><th class='r'>조정</th>"+
+    "<th class='r'>공제계</th><th class='r'>차인지급액</th><th>지급상태</th><th class='r'>관리</th></tr></thead><tbody>"+body+
+    "</tbody><tfoot><tr><td style='font-weight:700'>합계</td>"+
+    "<td class='r tnum'>"+moneyWon(sumBase)+"</td><td colspan='6'></td>"+
+    "<td class='r tnum'>"+moneyWon(sumDed)+"</td><td class='r tnum'>"+moneyWon(sumGross)+"</td>"+
+    "<td colspan='2'>"+(sumUnpaid ? "<span style='font-size:11px;color:var(--urgent);font-weight:700'>미지급 "+moneyWon(sumUnpaid)+"</span>" : "")+"</td>"+
+    "</tr></tfoot></table></div>";
+  return h;
+}
+function payrollSection(){
+  return "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>대표 급여 · 근로소득</div><h3>급여대장</h3>"+
+      "<div class='sec-note' style='margin-top:4px'>기본급에서 4대보험·원천세를 공제하고 남은 <b>차인지급액</b>이 실제로 통장에서 나갑니다. "+
+      "지출 그래프와 영업이익에는 <b>지급완료된 차인지급액만</b> 반영합니다 — 명세서가 발행됐어도 실지급 전이면 "+
+      "통장에서 나가지 않았으므로 회계상 미지급금(부채)이고, 국민연금·건강보험·장기요양·소득세는 이미 "+
+      "단건 지출(expense)에 자동이체로 잡혀 있어 기본급을 쓰면 같은 돈을 두 번 세게 됩니다.</div></div>"+
+      "<button class='btn sm' data-pr-add>+ 급여 등록</button></div>"+
+    "<div data-pr-body>"+payrollInner()+"</div></section>";
+}
+function drawPayrollBody(){
+  var box = C.querySelector("[data-pr-body]");
+  if (!box) return;
+  box.innerHTML = payrollInner();
+  bindPayrollBody();
+  applyMask();
+}
+function bindPayrollBody(){
+  C.querySelectorAll("[data-pr-y]").forEach(function(b){
+    b.onclick = function(){ payrollYear = Number(b.getAttribute("data-pr-y")); drawPayrollBody(); };
+  });
+  C.querySelectorAll("[data-pr-edit]").forEach(function(b){
+    b.onclick = function(){ openForm("payroll", findById(payrollAll(), b.getAttribute("data-pr-edit"))); };
+  });
+  C.querySelectorAll("[data-pr-del]").forEach(function(b){
+    b.onclick = function(){ delRow("payroll", b.getAttribute("data-pr-del")); };
+  });
+}
+function bindPayroll(){
+  var add = C.querySelector("[data-pr-add]");
+  if (add) add.onclick = function(){ openForm("payroll", null, { emp_code:"101", name:"김진용", position:"대표이사", status:"미지급" }); };
+  bindPayrollBody();
+}
+
 /* ---- 법인카드 (승인문자·카드명세서 자동수집 + 수동입력) ---- */
 var cardsPage = 1, cardsQ = "";
 var CARDS_PER = 20;
@@ -4533,9 +4751,11 @@ function subsSummarySection(){
   return h;
 }
 
-/* ---- 이번 달 총 지출 = 고정경비 + 법인카드 + 개별지출 + 외주 인건비 ----
-   네 값은 서로 다른 테이블(fixedcost / cards / expense / payouts)에서만 뽑으므로 겹치지 않는다.
-   AI 구독료는 법인카드 결제분에 이미 포함되어 있어 따로 더하지 않는다. */
+/* ---- 이번 달 총 지출 = 고정경비 + 법인카드 + 개별지출 + 외주 인건비 + 급여 ----
+   다섯 값은 서로 다른 테이블(fixedcost / cards / expense / payouts / payroll)에서만 뽑으므로 겹치지 않는다.
+   AI 구독료는 법인카드 결제분에 이미 포함되어 있어 따로 더하지 않는다.
+   급여는 payrollSpend() 로만 더한다 — 발행됐어도 실제 지급 전이면 통장에서 나가지 않았으므로 지출이 아니고,
+   지급완료분도 차인지급액(net_pay)만 쓴다(4대보험·원천세는 이미 expense 에 자동이체로 잡혀 있다). */
 function expenseTotalSection(){
   var now = seoulNow(), curY = now.getFullYear(), curM = now.getMonth()+1, curYm = ymKey(now);
   var fixedThis = (state.data.fixedcost||[]).reduce(function(a,r){
@@ -4548,17 +4768,24 @@ function expenseTotalSection(){
   var payoutThis = payoutsAll().reduce(function(a,x){
     return a + (String(x.date||"").slice(0,7)===curYm ? payoutPaid(x) : 0);
   }, 0);
-  var total = fixedThis + cardThis + expThis + payoutThis;
+  /* 급여는 지급완료분의 차인지급액만 — 미지급은 통장에서 나가지 않았고,
+     4대보험·원천세는 이미 단건 지출에 자동이체로 잡혀 있다 */
+  var payrollThis = payrollAll().reduce(function(a,x){
+    return a + (String(x.ym||"").slice(0,7)===curYm ? payrollSpend(x) : 0);
+  }, 0);
+  var total = fixedThis + cardThis + expThis + payoutThis + payrollThis;
   return "<section class='panel'>"+
     "<div class='sec-head'><div><div class='eyebrow'>"+curY+"년 "+curM+"월 총 지출</div>"+
       "<h3>"+moneyWon(total)+"</h3>"+
-      "<div class='sec-note' style='margin-top:4px'>고정경비(부담분) "+comma(fixedThis)+"원 + 법인카드 "+comma(cardThis)+"원 + 개별지출 "+comma(expThis)+"원 + 외주 인건비 "+comma(payoutThis)+"원 · "+
-      "네 항목은 각각 다른 표에 기록되어 중복 합산되지 않습니다. AI 구독료는 법인카드 결제분에 포함되어 따로 더하지 않습니다.</div></div>"+
+      "<div class='sec-note' style='margin-top:4px'>고정경비(부담분) "+comma(fixedThis)+"원 + 법인카드 "+comma(cardThis)+"원 + 개별지출 "+comma(expThis)+"원 + 외주 인건비 "+comma(payoutThis)+"원 + 급여 "+comma(payrollThis)+"원 · "+
+      "다섯 항목은 각각 다른 표에 기록되어 중복 합산되지 않습니다. AI 구독료는 법인카드 결제분에 포함되어 따로 더하지 않습니다. "+
+      "급여는 실제 지급된(지급완료) 차인지급액만 더합니다 — 미지급 급여는 통장에서 나가지 않았고, 4대보험·원천세는 이미 개별지출에 자동이체로 잡혀 있습니다.</div></div>"+
     "<div class='sum-strip' style='padding:0'>"+
       "<div class='sum-chip'>고정경비<b class='tnum'>"+moneyMan(fixedThis)+"</b></div>"+
       "<div class='sum-chip'>법인카드<b class='tnum'>"+moneyMan(cardThis)+"</b></div>"+
       "<div class='sum-chip'>개별지출<b class='tnum'>"+moneyMan(expThis)+"</b></div>"+
-      "<div class='sum-chip'>외주 인건비<b class='tnum'>"+moneyMan(payoutThis)+"</b></div></div>"+
+      "<div class='sum-chip'>외주 인건비<b class='tnum'>"+moneyMan(payoutThis)+"</b></div>"+
+      "<div class='sum-chip'>급여<b class='tnum'>"+moneyMan(payrollThis)+"</b></div></div>"+
     "</div></section>";
 }
 /* ---- 지출 현황 그래프 ----
@@ -4566,6 +4793,8 @@ function expenseTotalSection(){
    AI 구독료는 법인카드 결제분에 이미 포함되어 있어 따로 더하지 않는다.
    상계(offset)는 고정경비로 이미 잡힌 금액이라 여기에 넣지 않는다.
    외주 인건비(payouts)는 실지급액(paid)만 더한다 — 원천징수분은 우리 통장에서 나가지 않는다.
+   급여(payroll)는 payrollSpend() 로만 더한다 — 발행됐어도 실제 지급 전이면 통장에서 나가지 않았으므로 지출이 아니고,
+   지급완료분도 차인지급액(net_pay)만 쓴다(4대보험·원천세는 이미 expense 에 자동이체로 잡혀 있어 기본급을 쓰면 이중 계상).
    고정경비는 반드시 fcMonthVal(부담률 적용)로만 합산한다 — 청구액 전액을 쓰면 안 된다. */
 var expChartMode = "month";   /* "month" | "year" */
 var expChartYear = null;
@@ -4573,7 +4802,8 @@ var EXP_SERIES = [
   { key:"fixed",  name:"고정경비(부담분)", color:"var(--vfx)" },
   { key:"card",   name:"법인카드",         color:"var(--cost)" },
   { key:"exp",    name:"단건 지출",        color:"var(--aiedu)" },
-  { key:"payout", name:"외주 인건비",       color:"var(--mk-deadline)" }
+  { key:"payout", name:"외주 인건비",       color:"var(--mk-deadline)" },
+  { key:"payroll",name:"급여",             color:"var(--aivfx)" }
 ];
 /* 데이터가 존재하는 연도 + 올해 */
 function expYearList(){
@@ -4581,6 +4811,7 @@ function expYearList(){
   (state.data.fixedcost||[]).forEach(function(r){ var y=Number(r.year); if(y) ys[y]=1; });
   function scan(list){ (list||[]).forEach(function(x){ var y=Number(String(x.date||"").slice(0,4)); if(y) ys[y]=1; }); }
   scan(cardsAll()); scan(state.data.expense); scan(payoutsAll());
+  payrollAll().forEach(function(x){ var y=Number(String(x.ym||"").slice(0,4)); if(y) ys[y]=1; });
   var out = Object.keys(ys).map(Number);
   var cy = seoulNow().getFullYear();
   if (out.indexOf(cy)<0) out.push(cy);
@@ -4591,12 +4822,18 @@ function expYearList(){
 function expMonthlyRows(year){
   year = Number(year);
   var rows = [], m;
-  for (m=1; m<=12; m++) rows.push({ label:m+"월", key:year+"-"+pad2(m), fixed:0, card:0, exp:0, payout:0 });
+  for (m=1; m<=12; m++) rows.push({ label:m+"월", key:year+"-"+pad2(m), fixed:0, card:0, exp:0, payout:0, payroll:0 });
   (state.data.fixedcost||[]).forEach(function(r){
     if (Number(r.year)!==year) return;
     for (var k=1; k<=12; k++) rows[k-1].fixed += fcMonthVal(r, k);   /* 부담률 적용분만 */
   });
   payoutMonthly(year).forEach(function(p){ rows[p.m-1].payout += p.paid; });   /* 실지급액만 */
+  payrollAll().forEach(function(x){                                            /* 지급완료분의 차인지급액만 */
+    var ys = String(x.ym||"");
+    if (Number(ys.slice(0,4))!==year) return;
+    var pm = Number(ys.slice(5,7));
+    if (pm>=1 && pm<=12) rows[pm-1].payroll += payrollSpend(x);
+  });
   function addDated(list, field){
     (list||[]).forEach(function(x){
       var s = String(x.date||"");
@@ -4613,13 +4850,13 @@ function expMonthlyRows(year){
 function expYearRows(){
   var out = [];
   expYearList().forEach(function(y){
-    var t = { label:y+"년", key:String(y), fixed:0, card:0, exp:0, payout:0 };
-    expMonthlyRows(y).forEach(function(r){ t.fixed+=r.fixed; t.card+=r.card; t.exp+=r.exp; t.payout+=r.payout; });
+    var t = { label:y+"년", key:String(y), fixed:0, card:0, exp:0, payout:0, payroll:0 };
+    expMonthlyRows(y).forEach(function(r){ t.fixed+=r.fixed; t.card+=r.card; t.exp+=r.exp; t.payout+=r.payout; t.payroll+=r.payroll; });
     if (expRowTotal(t) > 0) out.push(t);
   });
   return out;
 }
-function expRowTotal(r){ return r.fixed + r.card + r.exp + r.payout; }
+function expRowTotal(r){ return r.fixed + r.card + r.exp + r.payout + r.payroll; }
 /* 누적 막대 SVG (만원 단위). curKey 와 같은 key 의 막대는 테두리로 강조 */
 function expStackChartSVG(rows, curKey){
   var W = Math.max(720, rows.length*74), H=300, padL=54, padR=16, padT=22, padB=42;
@@ -4755,6 +4992,7 @@ function renderExpenses(){
   html += fixedCostSection();
   html += offsetSection();
   html += payoutsSection();
+  html += payrollSection();
   html += cardsSection();
   html += subsSummarySection();
   var chips = "<div class='sum-chip'>전체 지출<b class='tnum'>"+moneyMan(sum)+"</b></div>";
@@ -4772,6 +5010,7 @@ function renderExpenses(){
   bindFixedCost();
   bindOffset();
   bindPayouts();
+  bindPayroll();
   bindCards();
   var sgo = C.querySelector("[data-subs-go]");
   if (sgo) sgo.onclick = function(){ location.hash = "#subs"; };
@@ -7526,6 +7765,142 @@ function renderCompany(){
   applyMask();
 }
 
+/* ---- 세무일정 ----
+   세무 신고·납부 "기한"만 관리하는 표다. 금액을 다루지 않으므로
+   지출 합계·지출 그래프·monthlyAgg 어디에도 넣지 않는다 — 실제 납부액은 계좌·법인카드에서 이미 잡힌다. */
+var taxdueYear = null;
+function taxdueAll(){ return (state.data && state.data.taxdue) || []; }
+function taxdueRowYear(x){ return Number(x.year) || Number(String(x.due_date||"").slice(0,4)) || 0; }
+/* 데이터에 있는 연도 + 올해 */
+function taxdueYearList(){
+  var ys = {};
+  taxdueAll().forEach(function(x){ var y = taxdueRowYear(x); if(y) ys[y]=1; });
+  var out = Object.keys(ys).map(Number);
+  var cy = seoulNow().getFullYear();
+  if (out.indexOf(cy)<0) out.push(cy);
+  out.sort(function(a,b){ return a-b; });
+  return out;
+}
+/* 기본은 올해 — 올해 데이터가 없으면 가장 가까운 연도 */
+function taxdueActiveYear(){
+  var years = taxdueYearList();
+  var cy = seoulNow().getFullYear();
+  if (taxdueYear && years.indexOf(Number(taxdueYear))>=0) return Number(taxdueYear);
+  if (years.indexOf(cy)>=0) return cy;
+  var best = years[0];
+  years.forEach(function(y){ if (Math.abs(y-cy) < Math.abs(best-cy)) best = y; });
+  return best;
+}
+function taxdueRowsForYear(year){
+  year = Number(year);
+  return taxdueAll().filter(function(x){ return taxdueRowYear(x) === year; })
+    .sort(function(a,b){ return String(a.due_date||"9999").localeCompare(String(b.due_date||"9999")); });
+}
+/* 미완료 + 오늘 이후 기한 — within 을 주면 그 일수 이내만. 화면과 대시보드 알림이 같은 판정을 쓴다. */
+function taxdueUpcoming(within){
+  var now = seoulNow(), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return taxdueAll().map(function(x){
+    var dd = parseDate(x.due_date);
+    return { x:x, days: dd ? Math.round((dd-today)/86400000) : null };
+  }).filter(function(r){
+    if (r.x.done || r.days == null || r.days < 0) return false;
+    return (within == null) || (r.days <= within);
+  }).sort(function(a,b){ return a.days - b.days; });
+}
+/* 기한 배지 — 완료 건은 강조하지 않고, 지난 기한은 "기한 경과"로 알린다 */
+function taxdueDdayHtml(x, today){
+  if (!x.due_date) return "<span style='color:var(--ink-3)'>미정</span>";
+  var info = ddayInfo(x.due_date, today, !!x.done);
+  if (x.done) return insDdayHtml("far", info.txt);
+  var dd = parseDate(x.due_date);
+  var diff = dd ? Math.round((dd-today)/86400000) : null;
+  if (diff != null && diff < 0) return insDdayHtml("over", "기한 경과");
+  if (diff != null && diff <= 7) return insDdayHtml("soon", info.txt);
+  return insDdayHtml(info.cls, info.txt);
+}
+function renderTaxdue(){
+  var now = seoulNow(), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var years = taxdueYearList();
+  var year = taxdueActiveYear();
+  var list = taxdueRowsForYear(year);
+  var doneN = list.filter(function(x){ return !!x.done; }).length;
+
+  var html = pageHead("taxdue", "신고·납부 기한만 관리합니다 · 납부액은 계좌·법인카드에서 집계되므로 지출 합계에는 잡히지 않습니다",
+    "<button class='btn primary' data-tax-add>+ 일정 추가</button>");
+
+  /* 다가오는 기한 3건 */
+  var soon3 = taxdueUpcoming(null).slice(0, 3);
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>다가오는 기한</div>"+
+    "<h3>가장 가까운 세무 기한 3건</h3></div></div><div style='padding:4px 20px 20px'>";
+  if (!soon3.length){
+    html += "<div class='empty'>예정된 기한이 없습니다.</div>";
+  } else {
+    html += "<div class='kpis' style='grid-template-columns:repeat("+soon3.length+",1fr); margin-bottom:0'>";
+    soon3.forEach(function(r){
+      var cls = r.days <= 7 ? " k-ar" : "";
+      html += "<div class='kpi"+cls+"'>"+
+        "<div class='label'>"+esc(r.x.kind||"세무")+" · "+esc(String(r.x.due_date||"").slice(0,10))+"</div>"+
+        "<div class='big'>"+(r.days===0 ? "D-DAY" : "D-"+r.days)+"</div>"+
+        "<div class='meta'><span>"+esc(r.x.title||"")+"</span>"+
+          (r.x.period ? "<span>대상 "+esc(r.x.period)+"</span>" : "")+"</div></div>";
+    });
+    html += "</div>";
+  }
+  html += "</div></section>";
+
+  /* 연도별 목록 */
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>"+year+"년</div>"+
+    "<h3>세무 신고·납부 기한</h3>"+
+    "<div class='sec-note' style='margin-top:4px'>전체 "+list.length+"건 · 완료 "+doneN+"건 · 남은 "+(list.length-doneN)+"건</div></div></div>";
+  if (years.length > 1){
+    html += "<div class='proj-chips' style='padding:12px 20px 0'>";
+    years.forEach(function(y){
+      html += "<button class='proj-chip"+(y===year?" on":"")+"' data-tax-y='"+y+"'>"+y+"년</button>";
+    });
+    html += "</div>";
+  }
+  if (!list.length){
+    html += "<div class='empty'>"+year+"년 등록된 세무 일정이 없습니다.</div></section>";
+  } else {
+    var body = "";
+    list.forEach(function(x){
+      var dim = x.done ? " style='opacity:.55'" : "";
+      body += "<tr"+dim+"><td class='tnum' style='white-space:nowrap'>"+
+          esc(String(x.due_date||"").slice(0,10))+"<div style='margin-top:4px'>"+taxdueDdayHtml(x, today)+"</div></td>"+
+        "<td><span class='mini-tag vfx'>"+esc(x.kind||"기타")+"</span></td>"+
+        "<td style='font-weight:700'>"+esc(x.title||"")+
+          (x.memo ? "<div style='font-size:11px;color:var(--ink-3);font-weight:400'>"+esc(x.memo)+"</div>" : "")+"</td>"+
+        "<td>"+esc(x.period||"")+"</td>"+
+        "<td><div class='chk' data-tax-toggle='"+esc(x.id)+"'"+
+          (x.done ? " style='background:var(--accent);border-color:var(--accent);color:#fff'" : "")+">✓</div></td>"+
+        "<td class='r'><div class='row-actions'><button class='icon-btn' data-tax-edit='"+esc(x.id)+"'>✎</button>"+
+          "<button class='icon-btn del' data-tax-del='"+esc(x.id)+"'>🗑</button></div></td></tr>";
+    });
+    html += "<div class='tbl-scroll'><table><thead><tr><th>기한</th><th>구분</th><th>내용</th>"+
+      "<th>대상기간</th><th>완료</th><th class='r'>관리</th></tr></thead><tbody>"+body+"</tbody></table></div></section>";
+  }
+
+  C.innerHTML = html;
+  var add = C.querySelector("[data-tax-add]");
+  if (add) add.onclick = function(){ openForm("taxdue", null, { year: year }); };
+  C.querySelectorAll("[data-tax-y]").forEach(function(b){
+    b.onclick = function(){ taxdueYear = Number(b.getAttribute("data-tax-y")); renderTaxdue(); };
+  });
+  C.querySelectorAll("[data-tax-edit]").forEach(function(b){
+    b.onclick = function(){ openForm("taxdue", findById(taxdueAll(), b.getAttribute("data-tax-edit"))); };
+  });
+  C.querySelectorAll("[data-tax-del]").forEach(function(b){
+    b.onclick = function(){ delRow("taxdue", b.getAttribute("data-tax-del")); };
+  });
+  C.querySelectorAll("[data-tax-toggle]").forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute("data-tax-toggle"), row = findById(taxdueAll(), id);
+      if (row) crud("PATCH", "taxdue", id, { done: !row.done });
+    };
+  });
+  applyMask();
+}
+
 var ROUTES = {
   dashboard:renderDashboard, todos:renderTodos, calendar:renderCalendar, meetings:renderMeetings,
   memos:renderMemos, mail:function(){ renderMailView("mail"); },
@@ -7533,7 +7908,7 @@ var ROUTES = {
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
   newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov,
   subs:renderSubs, library:renderLibrary, homepage:renderHomepage, cardhist:renderCardHist,
-  company:renderCompany
+  company:renderCompany, taxdue:renderTaxdue
 };
 /* 마스터 키 오류 화면 — 금고(config/portal)의 키를 수신부(GAS)가 거부했을 때.
    키 수동 입력 게이트는 제거됨 — 어드민만 여기서 새 키를 금고에 재등록할 수 있다. */
