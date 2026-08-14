@@ -2388,7 +2388,10 @@ function mountCalendar(container){
   draw();
 }
 
-/* ============ 월별 매출·매입 집계 ============ */
+/* ============ 월별 매출·매입 집계 ============
+   매입(cost) = 단건 지출(expense) + 외주 인건비(payouts 의 실지급액 paid).
+   두 값은 서로 다른 테이블에서만 뽑으므로 중복 합산되지 않는다.
+   payouts 는 contract(계약금액)가 아니라 paid(실지급액)만 더한다 — 원천징수분은 통장에서 나가지 않는다. */
 function monthlyAgg(){
   var d = state.data, map = {};
   function ensure(k){ if(!map[k]) map[k]={key:k, done:0, wait:0, cost:0}; return map[k]; }
@@ -2402,6 +2405,11 @@ function monthlyAgg(){
     var dt = parseDate(x.date); if(!dt) return;
     var k = dt.getFullYear()+"-"+pad2(dt.getMonth()+1);
     ensure(k).cost += Number(x.amount)||0;
+  });
+  payoutsAll().forEach(function(x){
+    var dt = parseDate(x.date); if(!dt) return;
+    var k = dt.getFullYear()+"-"+pad2(dt.getMonth()+1);
+    ensure(k).cost += payoutPaid(x);
   });
   var keys = Object.keys(map).sort();
   return keys.map(function(k){ return map[k]; });
