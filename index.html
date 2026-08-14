@@ -245,6 +245,7 @@
   svg.bars{display:block; width:100%; min-width:460px; height:auto;}
   .bar-rect{cursor:pointer;} .bar-rect:hover{opacity:.82;}
   .axis-txt{fill:var(--ink-3); font-size:11px;}
+  .bar-val{fill:var(--ink-2); font-size:11.5px; font-weight:700;}   /* 막대 위 수치 */
   .axis-txt.month{fill:var(--ink-2); font-size:12.5px; font-weight:700;}
   .grid-line{stroke:var(--grid); stroke-width:1;}
   .zero-line{stroke:var(--line-strong); stroke-width:1;}
@@ -5777,6 +5778,10 @@ function hpChartSVG(days, period){
     var h = (vis/maxY)*plotH, y = yb-h;
     var lbl = period===365 ? esc(String(b.date).slice(2).replace("-","/")) : esc(String(b.date).slice(5));
     s+="<rect class='bar-rect' x='"+x+"' y='"+y+"' width='"+barW+"' height='"+Math.max(h, vis>0?1:0)+"' rx='3' fill='var(--accent)' data-tip=\"<b>"+lbl+"</b><div class=&#39;tt-row&#39;><span>방문자</span><span>"+comma(vis)+"</span></div><div class=&#39;tt-row&#39;><span>페이지뷰</span><span>"+comma(b.pageviews)+"</span></div><div class=&#39;tt-row&#39;><span>리드</span><span>"+comma(b.leads)+"</span></div>\"></rect>";
+    /* 막대 위 방문자 수 — 0인 날은 생략, 막대가 촘촘하면(라벨 솎아낼 때) 함께 솎아낸다 */
+    if (vis > 0 && i % lblEvery === 0){
+      s+="<text x='"+(x+barW/2)+"' y='"+(y-6)+"' text-anchor='middle' class='bar-val'>"+comma(vis)+"</text>";
+    }
     if (i % lblEvery === 0){
       s+="<text x='"+(x+barW/2)+"' y='"+(yb+20)+"' text-anchor='middle' class='axis-txt'>"+lbl+"</text>";
     }
