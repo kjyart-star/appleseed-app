@@ -2525,6 +2525,10 @@ function mountCalendar(container){
    (국가에 낼 돈을 잠시 받아둔 것) 손익은 반드시 공급가액으로 계산한다.
    monthlyAgg() 와 누적 카드(ytdProfit)가 이 두 함수를 함께 쓰므로 두 화면의 숫자가 어긋나지 않는다.
    매출은 supply 가 비면 amount/1.1 로 되돌리고, 매입은 면세·간이영수증이 섞여 있어 amount 를 그대로 쓴다. */
+/* 부가세 납부는 비용이 아니다 — 고객에게서 받아둔 예수금을 국가에 넘기는 정산일 뿐이다.
+   현금은 나가지만 손익과 무관하므로 영업이익 계산에서 제외한다.
+   (지출관리 목록·지출 그래프에서는 그대로 둔다 — 실제로 통장에서 나간 돈이라 현금흐름으로는 보여야 한다.) */
+function isVatPayment(x){ return String(x && x.category) === "부가세납부"; }
 function hasSupply(v){ return !(v==="" || v===null || v===undefined); }
 function revSupply(r){ return hasSupply(r && r.supply) ? (Number(r.supply)||0) : Math.round((Number(r&&r.amount)||0)/1.1); }
 function expSupply(x){ return hasSupply(x && x.supply) ? (Number(x.supply)||0) : (Number(x&&x.amount)||0); }
@@ -2539,6 +2543,7 @@ function monthlyAgg(){
   });
   (d.expense||[]).forEach(function(x){
     var dt = parseDate(x.date); if(!dt) return;
+    if (isVatPayment(x)) return;   /* 부가세 납부는 손익상 비용이 아니다 */
     var k = dt.getFullYear()+"-"+pad2(dt.getMonth()+1);
     ensure(k).cost += expSupply(x);
   });
@@ -3795,7 +3800,6 @@ function renderRevenue(){
   var vatSum = list.reduce(function(a,r){ return a+rvat(r); },0);
   var tax = taxUnissued();
   var html = pageHead("revenue","", "<button class='btn primary' data-add>+ 매출 추가</button>");
-  html += vatCardHTML();
   html += "<section class='panel'><div class='sum-strip'>"+
     "<div class='sum-chip'>공급가액 (실매출)<b class='tnum' style='font-size:19px'>"+moneyWon(supSum)+"</b>"+
     "<div style='font-size:11px;color:var(--ink-3);margin-top:3px'>회사의 실제 매출입니다</div></div>"+
@@ -3823,8 +3827,11 @@ function renderRevenue(){
     });
     html += "</tbody><tfoot><tr><td colspan='3' style='font-weight:700'>합계</td><td class='r tnum'>"+moneyWon(supSum)+"</td><td class='r tnum'>"+moneyWon(vatSum)+"</td><td class='r tnum'>"+moneyWon(sum)+"</td><td colspan='4'></td></tr></tfoot></table>"; }
   html += "</div></section>";
+  /* 부가세는 참고 정보다 — 매출 목록·요약을 먼저 보이고 그 아래에 접힌 채로 둔다. */
+  html += vatCardHTML();
   C.innerHTML = html;
   C.querySelector("[data-add]").onclick = function(){ openForm("revenue", null); };
+  bindFold(C);
   bindRowActions(C, "revenue", d.revenue);
   C.querySelectorAll("[data-status]").forEach(function(b){
     b.onclick = function(){ var id=b.getAttribute("data-status"); var row=findById(d.revenue,id);
@@ -5044,7 +5051,11 @@ function renderExpenses(){
       "<td class='r tnum'>"+moneyWon(x.amount)+"</td>"+
       "<td class='r'><div class='row-actions'><button class='icon-btn' data-edit='"+x.id+"'>✎</button><button class='icon-btn del' data-del='"+x.id+"'>🗑</button></div></td></tr>"; });
     html += "</tbody><tfoot><tr><td colspan='4' style='font-weight:700'>합계</td><td class='r tnum'>"+moneyWon(supSum)+"</td><td class='r tnum'>"+moneyWon(vatSum)+"</td><td class='r tnum'>"+moneyWon(sum)+"</td><td></td></tr></tfoot></table>"; }
-  html += "</div></section>";
+  html += "</div>";
+  html += "<div style='padding:0 20px 16px;font-size:11px;color:var(--ink-3);line-height:1.75'>"+
+    "※ 분류가 '부가세납부'인 건은 이 목록·지출 그래프에는 그대로 두되, 영업이익 계산에서는 뺍니다 — "+
+    "받아둔 예수금을 국가에 넘기는 정산이라 현금은 나가지만 손익상 비용이 아닙니다</div>";
+  html += "</section>";
   C.innerHTML = html;
   C.querySelector("[data-add]").onclick = function(){ openForm("expense", null); };
   bindExpenseChart();
@@ -5078,7 +5089,8 @@ function ytdProfit(){
     if (!inYtd(keyOf(r.date))) return;
     if (r.status==="입금완료") o.rev += revSupply(r); else o.wait += revSupply(r);
   });
-  (d.expense||[]).forEach(function(x){ if (inYtd(keyOf(x.date))) o.exp += expSupply(x); });
+  /* 부가세 납부는 손익상 비용이 아니다 — 예수금을 국가에 넘기는 정산이라 영업이익에서 뺀다 */
+  (d.expense||[]).forEach(function(x){ if (!isVatPayment(x) && inYtd(keyOf(x.date))) o.exp += expSupply(x); });
   cardsAll().forEach(function(x){ if (inYtd(keyOf(x.date))) o.card += Number(x.amount)||0; });
   payoutsAll().forEach(function(x){ if (inYtd(keyOf(x.date))) o.payout += payoutPaid(x); });
   /* 고정비는 전월까지만 잡는다 — 이번 달분은 아직 청구·정산 전이라 실제 비용이 아니다.
@@ -5147,51 +5159,139 @@ function ytdCardHTML(){
   return h;
 }
 
-/* ============ 부가가치세 예상 납부액 ============
+/* ============ 부가가치세 — 과세기간(기수)별 ============
+   법인 부가세는 네 기수로 나눠 신고·납부한다:
+     1기 예정(1~3월, 4/25) · 1기 확정(4~6월, 7/25) · 2기 예정(7~9월, 10/25) · 2기 확정(10~12월, 이듬해 1/25).
+   연초부터 통째로 묶으면 이미 신고·납부가 끝난 기수까지 "앞으로 낼 돈"으로 보이므로 반드시 기수로 끊는다.
+   상태는 오늘 날짜로 자동 판정한다 — 신고기한이 지났으면 납부완료, 기간이 시작됐으면 진행 중, 아직이면 대기.
+   (기간은 끝났지만 기한 전인 구간도 진행 중으로 본다 — 아직 내지 않은 돈이므로 앞으로 낼 예상액에 들어가야 한다.)
    매출세액은 status 와 무관하게 전부 더한다 — 부가세는 입금이 아니라 세금계산서 발행 기준으로 낸다.
    매입세액은 expense 의 vat 만 더한다. 법인카드(cards)·외주 인건비(payouts)·고정경비(fixedcost)는
-   세금계산서·신용카드매입세액공제 요건을 코드가 판정할 수 없고 해외결제는 애초에 공제 대상이 아니라 넣지 않는다.
-   연도 판정은 ytdProfit() 과 같다(올해 && 현재월까지). */
-function vatEstimate(){
-  var d = state.data, now = new Date();
-  var Y = now.getFullYear(), M = now.getMonth()+1;
-  function inYtd(k){ return /^\d{4}-\d{2}$/.test(k) && Number(k.slice(0,4))===Y && Number(k.slice(5,7))<=M; }
-  function keyOf(s){ var dt = parseDate(s); return dt ? dt.getFullYear()+"-"+pad2(dt.getMonth()+1) : ""; }
-  var o = { year:Y, month:M, day:now.getDate(), out:0, inp:0 };
+   세금계산서·신용카드매입세액공제 요건을 코드가 판정할 수 없고 해외결제는 애초에 공제 대상이 아니라 넣지 않는다. */
+function vatPeriods(){
+  var d = state.data, now = seoulNow();
+  var Y = now.getFullYear();
+  var today = new Date(Y, now.getMonth(), now.getDate()).getTime();
+  /* [이름, 표기, 시작월, 종료월, 기한월, 기한일, 기한 연도차] */
+  var defs = [
+    ["1기 예정", "1~3월",   1,  3,  4, 25, 0],
+    ["1기 확정", "4~6월",   4,  6,  7, 25, 0],
+    ["2기 예정", "7~9월",   7,  9, 10, 25, 0],
+    ["2기 확정", "10~12월",10, 12,  1, 25, 1]
+  ];
+  var list = [], i, f, st;
+  for (i=0; i<defs.length; i++){
+    f = defs[i];
+    st = "wait";
+    if (today > new Date(Y+f[6], f[4]-1, f[5]).getTime()) st = "paid";
+    else if (today >= new Date(Y, f[2]-1, 1).getTime()) st = "open";
+    list.push({ name:f[0], range:f[1], from:f[2], to:f[3],
+      dueY:Y+f[6], dueM:f[4], status:st, out:0, inp:0, net:0, paid:null });
+  }
+  /* 날짜가 속한 기수를 찾는다. 올해가 아니면 어느 기수에도 넣지 않는다. */
+  function slot(s){
+    var dt = parseDate(s); if (!dt || dt.getFullYear()!==Y) return null;
+    var m = dt.getMonth()+1, j;
+    for (j=0; j<list.length; j++){ if (m>=list[j].from && m<=list[j].to) return list[j]; }
+    return null;
+  }
   (d.revenue||[]).forEach(function(r){
-    if (!inYtd(keyOf(r.date))) return;
-    o.out += hasSupply(r.vat) ? (Number(r.vat)||0) : ((Number(r.amount)||0) - revSupply(r));
+    var p = slot(r.date); if (!p) return;
+    p.out += hasSupply(r.vat) ? (Number(r.vat)||0) : ((Number(r.amount)||0) - revSupply(r));
   });
   (d.expense||[]).forEach(function(x){
-    if (!inYtd(keyOf(x.date))) return;
-    o.inp += Number(x.vat)||0;
+    var p = slot(x.date); if (!p) return;
+    p.inp += Number(x.vat)||0;
   });
-  o.due = o.out - o.inp;
+  var o = { year:Y, list:list, out:0, inp:0, net:0,
+            paidNet:0, paidActual:0, upcoming:0, paidNames:[], gap:false };
+  list.forEach(function(p){
+    p.net = p.out - p.inp;
+    /* 납부서로 확인된 확정 금액이 있으면 그게 사실이다 — 기한 판정보다 우선한다 */
+    p.paid = vatPaidFromTaxdue(p.dueY, p.dueM);
+    if (p.paid != null) p.status = "paid";
+    o.out += p.out; o.inp += p.inp; o.net += p.net;
+    if (p.status==="paid"){
+      o.paidNet += p.net; o.paidNames.push(p.name);
+      if (p.paid != null){ o.paidActual += p.paid; if (p.paid !== p.net) o.gap = true; }
+    } else o.upcoming += p.net;
+  });
   return o;
 }
-function vatCardHTML(){
-  var v = vatEstimate();
-  var refund = v.due < 0;
-  var col = refund ? "var(--pos)" : "var(--pending)";
-  function line(lb, val, sign){
-    return "<div style='display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:5px 0;font-size:13.5px'>"+
-      "<span style='color:var(--ink-2)'>"+lb+"</span>"+
-      "<span class='tnum' style='font-weight:700'>"+(sign||"")+moneyWon(val)+"</span></div>";
+/* 실제 납부액은 taxdue 의 부가세 행에서 읽는다 — 납부서로 확인된 확정값이다.
+   (expense 에서 '기흥세무서' 건을 금액으로 추려 추정하던 방식은 폐기했다. 원천세와 구분되지 않아 부정확했다.)
+   기수 대응은 신고·납부 기한의 연·월로 판정한다 — 1기 예정 4월 · 1기 확정 7월 · 2기 예정 10월 · 2기 확정 이듬해 1월.
+   실제 납부일은 주말에 밀려 4/27·7/27 처럼 며칠 늦으므로 일자는 보지 않는다.
+   연도까지 함께 보는 이유: 1월 기한 행은 '작년 2기 확정'이라 월만 보면 올해 것과 섞인다. */
+function vatPaidFromTaxdue(dueY, dueM){
+  var rows = (state.data && state.data.taxdue) || [], i, x, dt, m;
+  for (i=0; i<rows.length; i++){
+    x = rows[i];
+    if (String(x.kind||"").indexOf("부가세") < 0) continue;
+    if (!taxdueDone(x)) continue;
+    dt = parseDate(x.due_date); if (!dt) continue;
+    if (dt.getFullYear()!==dueY || (dt.getMonth()+1)!==dueM) continue;
+    m = /납부 완료 ([\d,]+)원/.exec(String(x.memo||""));
+    if (m) return Number(String(m[1]).replace(/,/g, "")) || 0;
   }
-  var h = "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>세금</div>"+
-    "<h3>부가가치세 예상</h3></div>"+
-    "<div class='sec-note'>"+v.year+"년 현재까지</div></div>"+
-    "<div style='padding:16px 20px 20px'>";
-  h += line("매출세액", v.out, "");
-  h += line("매입세액", v.inp, "− ");
-  h += "<div style='border-top:1px solid var(--line-strong);margin:12px 0 14px'></div>";
-  h += "<div style='display:flex;justify-content:space-between;align-items:baseline;gap:14px'>"+
-    "<span style='font-weight:800;font-size:16px'>"+(refund?"환급 예상":"납부 예상")+"</span>"+
-    "<span class='tnum' style='font-size:38px;font-weight:800;line-height:1.15;color:"+col+"'>"+moneyWon(Math.abs(v.due))+"</span></div>";
-  h += "<div style='margin-top:14px;font-size:12px;color:var(--ink-2);line-height:1.7'>"+
-    "※ 입금 대기 건도 세금계산서 발행 기준으로 포함했습니다"+
-    "<br>※ 카드·해외결제 등 세금계산서가 없는 매입은 공제되지 않습니다"+
-    "<br>※ 확정 금액은 세무대리인 신고 기준입니다</div>";
+  return null;
+}
+function vatStatusLabel(st){
+  return st==="paid" ? "납부완료" : (st==="open" ? "진행 중" : "대기");
+}
+/* 참고용 카드다 — 실제 신고·납부는 세무대리인이 한다. 기본 접힘·본문 크기·회색조로 조용하게 둔다. */
+function vatCardHTML(){
+  var v = vatPeriods();
+  var head = [];
+  v.list.forEach(function(p){ if (p.status!=="wait") head.push(p.name+" "+vatStatusLabel(p.status)); });
+  var sub = head.length ? head.join(" · ") : "집계 전";
+
+  var h = "<section class='panel collapsed' data-foldsec>"+
+    "<div class='sec-head fold-head' data-fold><div><div class='eyebrow'>참고</div>"+
+    "<h3 style='font-size:15px'>부가가치세 (참고) "+
+    "<span style='font-weight:400;color:var(--ink-3);font-size:12px'>· "+esc(sub)+" · 클릭하여 펼치기</span></h3>"+
+    "<div style='font-size:11px;color:var(--ink-3);margin-top:4px'>확정 금액은 세무대리인이 신고 기준으로 계산합니다</div></div>"+
+    "<div style='display:flex;align-items:center;gap:10px'><div class='sec-note'>"+v.year+"년</div>"+
+    "<span class='fold-btn'>▾</span></div></div>";
+
+  h += "<div class='fold-body'><div class='tbl-scroll'><table><thead><tr><th>기간</th>"+
+    "<th class='r'>매출세액</th><th class='r'>매입세액</th><th class='r'>계산 차액</th>"+
+    "<th class='r'>실제 납부</th><th class='c'>상태</th></tr></thead><tbody>";
+  v.list.forEach(function(p){
+    var dim = p.status==="wait" ? " style='color:var(--ink-3)'" : "";
+    var stSty = p.status==="open" ? "color:var(--pending);font-weight:700" : "color:var(--ink-3)";
+    h += "<tr"+dim+"><td>"+esc(p.name)+" <span style='color:var(--ink-3)'>("+esc(p.range)+")</span></td>"+
+      "<td class='r tnum'>"+moneyWon(p.out)+"</td>"+
+      "<td class='r tnum'>"+moneyWon(p.inp)+"</td>"+
+      "<td class='r tnum'>"+moneyWon(p.net)+"</td>"+
+      "<td class='r tnum'>"+(p.paid == null ? "<span style='color:var(--ink-3)'>—</span>" : moneyWon(p.paid))+"</td>"+
+      "<td class='c' style='"+stSty+";font-size:12px'>"+vatStatusLabel(p.status)+"</td></tr>";
+  });
+  h += "</tbody><tfoot><tr><td style='font-weight:700'>합계</td>"+
+    "<td class='r tnum'>"+moneyWon(v.out)+"</td><td class='r tnum'>"+moneyWon(v.inp)+"</td>"+
+    "<td class='r tnum'>"+moneyWon(v.net)+"</td>"+
+    "<td class='r tnum'>"+(v.paidActual ? moneyWon(v.paidActual) : "<span style='color:var(--ink-3)'>—</span>")+"</td>"+
+    "<td></td></tr></tfoot></table></div>";
+
+  /* 앞으로 낼 돈은 진행 중·대기 기수의 합만 — 이미 낸 기수는 빼야 한다. */
+  h += "<div style='padding:12px 20px 0;font-size:13px;display:flex;justify-content:space-between;"+
+    "align-items:baseline;gap:12px;flex-wrap:wrap'>"+
+    "<span style='color:var(--ink-2)'>앞으로 낼 예상액 (진행 중·대기)</span>"+
+    (v.upcoming === 0
+      ? "<span style='color:var(--ink-3)'>이번 기수에 아직 발생한 세액이 없습니다</span>"
+      : "<span class='tnum' style='font-weight:700'>"+moneyWon(v.upcoming)+"</span>")+
+    "</div>";
+
+  var notes = "※ 신고 기한이 지난 기간은 납부 완료로 표시합니다"+
+    "<br>※ 매입이 확정되면 세액이 조정됩니다 — 확정 금액은 세무대리인 신고 기준입니다"+
+    "<br>※ 카드·해외결제 등 세금계산서가 없는 매입은 이 계산에 포함되지 않습니다";
+  if (v.paidActual){
+    notes += "<br>※ 실제 납부액은 세무일정(taxdue)에 기록된 납부서 확인 금액입니다 — 계산상 "+
+      esc(v.paidNames.join("·"))+" 세액 "+comma(v.paidNet)+"원 / 실제 납부 "+comma(v.paidActual)+"원";
+    if (v.gap) notes += "<br>※ 차이는 시스템에 없는 매입 세금계산서 때문입니다 — 세무대리인 신고 기준이 정확합니다";
+  }
+  notes += "<br>※ 부가세 납부액은 영업이익 계산에서 제외합니다 — 받아둔 예수금을 국가에 넘기는 정산이라 비용이 아닙니다";
+  h += "<div style='padding:12px 20px 18px;font-size:11px;color:var(--ink-3);line-height:1.75'>"+notes+"</div>";
   h += "</div></section>";
   return h;
 }
@@ -7986,18 +8086,29 @@ function taxdueUpcoming(within){
     var dd = parseDate(x.due_date);
     return { x:x, days: dd ? Math.round((dd-today)/86400000) : null };
   }).filter(function(r){
-    if (r.x.done || r.days == null || r.days < 0) return false;
+    /* days < 0 을 빼므로 "다가오는 기한" 카드에는 미래 기한만 오른다 — 지난 건은 목록에서 확인한다 */
+    if (taxdueDone(r.x) || r.days == null || r.days < 0) return false;
     return (within == null) || (r.days <= within);
   }).sort(function(a,b){ return a.days - b.days; });
 }
-/* 기한 배지 — 완료 건은 강조하지 않고, 지난 기한은 "기한 경과"로 알린다 */
+/* done 은 시트에서 문자열 "Y" 와 불리언이 섞여 들어온다 — 체크박스로 저장된 true 와
+   손으로 적은 "Y" 가 공존하므로 둘 다 완료로 본다. !x.done 같은 falsy 체크는 쓰지 않는다. */
+function taxdueDone(x){
+  var v = x && x.done;
+  return v === true || String(v) === "Y";
+}
+/* 기한 배지 — 기장은 세무대리인이 대행하고 원천세·4대보험은 매월 자동이체로 납부되고 있어,
+   지난 기한 중 상당수는 실제로는 처리됐고 시스템에 체크만 안 된 것이다.
+   그걸 전부 빨간 "기한 경과"로 띄우면 화면이 온통 경고가 되어 정작 진짜 놓친 기한이 묻힌다.
+   그래서 지난 건은 중간 톤 "확인 필요"로 낮추고, 경고색은 7일 이내로 다가온 건에만 남긴다. */
 function taxdueDdayHtml(x, today){
   if (!x.due_date) return "<span style='color:var(--ink-3)'>미정</span>";
-  var info = ddayInfo(x.due_date, today, !!x.done);
-  if (x.done) return insDdayHtml("far", info.txt);
+  var done = taxdueDone(x);
+  var info = ddayInfo(x.due_date, today, done);
+  if (done) return insDdayHtml("far", info.txt);
   var dd = parseDate(x.due_date);
   var diff = dd ? Math.round((dd-today)/86400000) : null;
-  if (diff != null && diff < 0) return insDdayHtml("over", "기한 경과");
+  if (diff != null && diff < 0) return insDdayHtml("mid", "확인 필요");
   if (diff != null && diff <= 7) return insDdayHtml("soon", info.txt);
   return insDdayHtml(info.cls, info.txt);
 }
@@ -8006,7 +8117,7 @@ function renderTaxdue(){
   var years = taxdueYearList();
   var year = taxdueActiveYear();
   var list = taxdueRowsForYear(year);
-  var doneN = list.filter(function(x){ return !!x.done; }).length;
+  var doneN = list.filter(function(x){ return taxdueDone(x); }).length;
 
   var html = pageHead("taxdue", "신고·납부 기한만 관리합니다 · 납부액은 계좌·법인카드에서 집계되므로 지출 합계에는 잡히지 않습니다",
     "<button class='btn primary' data-tax-add>+ 일정 추가</button>");
@@ -8045,9 +8156,11 @@ function renderTaxdue(){
   if (!list.length){
     html += "<div class='empty'>"+year+"년 등록된 세무 일정이 없습니다.</div></section>";
   } else {
+    html += "<div style='padding:10px 20px 0;font-size:11.5px;color:var(--ink-3);line-height:1.7'>"+
+      "세무대리인(새한세무회계)이 기장을 대행하고 있어 지난 기한은 이미 처리됐을 수 있습니다. 확인 후 완료 체크해 주세요.</div>";
     var body = "";
     list.forEach(function(x){
-      var dim = x.done ? " style='opacity:.55'" : "";
+      var dim = taxdueDone(x) ? " style='opacity:.55'" : "";
       body += "<tr"+dim+"><td class='tnum' style='white-space:nowrap'>"+
           esc(String(x.due_date||"").slice(0,10))+"<div style='margin-top:4px'>"+taxdueDdayHtml(x, today)+"</div></td>"+
         "<td><span class='mini-tag vfx'>"+esc(x.kind||"기타")+"</span></td>"+
@@ -8055,7 +8168,7 @@ function renderTaxdue(){
           (x.memo ? "<div style='font-size:11px;color:var(--ink-3);font-weight:400'>"+esc(x.memo)+"</div>" : "")+"</td>"+
         "<td>"+esc(x.period||"")+"</td>"+
         "<td><div class='chk' data-tax-toggle='"+esc(x.id)+"'"+
-          (x.done ? " style='background:var(--accent);border-color:var(--accent);color:#fff'" : "")+">✓</div></td>"+
+          (taxdueDone(x) ? " style='background:var(--accent);border-color:var(--accent);color:#fff'" : "")+">✓</div></td>"+
         "<td class='r'><div class='row-actions'><button class='icon-btn' data-tax-edit='"+esc(x.id)+"'>✎</button>"+
           "<button class='icon-btn del' data-tax-del='"+esc(x.id)+"'>🗑</button></div></td></tr>";
     });
@@ -8078,7 +8191,8 @@ function renderTaxdue(){
   C.querySelectorAll("[data-tax-toggle]").forEach(function(b){
     b.onclick = function(){
       var id = b.getAttribute("data-tax-toggle"), row = findById(taxdueAll(), id);
-      if (row) crud("PATCH", "taxdue", id, { done: !row.done });
+      /* 읽기는 "Y"·불리언을 모두 받지만 쓰기는 "Y"/"" 로 통일한다 — 값 모양이 더 늘어나지 않게 */
+      if (row) crud("PATCH", "taxdue", id, { done: taxdueDone(row) ? "" : "Y" });
     };
   });
   applyMask();
