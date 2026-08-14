@@ -3789,22 +3789,39 @@ function renderRevenue(){
   var d = state.data, list = (d.revenue||[]).slice().sort(function(a,b){ return String(b.date||"").localeCompare(String(a.date||"")); });
   var sum = list.reduce(function(a,r){ return a+(Number(r.amount)||0); },0);
   var doneSum = list.filter(function(r){return r.status==="입금완료";}).reduce(function(a,r){return a+(Number(r.amount)||0);},0);
+  /* 부가세는 vat 컬럼이 채워져 있으면 그대로, 비면 합계−공급가액으로 되돌린다. */
+  function rvat(r){ return hasSupply(r && r.vat) ? (Number(r.vat)||0) : ((Number(r&&r.amount)||0) - revSupply(r)); }
+  var supSum = list.reduce(function(a,r){ return a+revSupply(r); },0);
+  var vatSum = list.reduce(function(a,r){ return a+rvat(r); },0);
   var tax = taxUnissued();
   var html = pageHead("revenue","", "<button class='btn primary' data-add>+ 매출 추가</button>");
-  html += "<section class='panel'><div class='sum-strip'><div class='sum-chip'>전체 매출<b class='tnum'>"+moneyMan(sum)+"</b></div><div class='sum-chip'>입금완료<b class='tnum'>"+moneyMan(doneSum)+"</b></div><div class='sum-chip'>입금대기<b class='tnum'>"+moneyMan(sum-doneSum)+"</b></div><div class='sum-chip'>계산서 미발행 "+tax.n+"건<b class='tnum'>"+moneyMan(tax.sum)+"</b></div></div><div class='tbl-scroll'>";
+  html += vatCardHTML();
+  html += "<section class='panel'><div class='sum-strip'>"+
+    "<div class='sum-chip'>공급가액 (실매출)<b class='tnum' style='font-size:19px'>"+moneyWon(supSum)+"</b>"+
+    "<div style='font-size:11px;color:var(--ink-3);margin-top:3px'>회사의 실제 매출입니다</div></div>"+
+    "<div class='sum-chip'>부가세 (예수금)<b class='tnum' style='font-size:13px;color:var(--pending)'>"+moneyWon(vatSum)+"</b>"+
+    "<div style='font-size:11px;color:var(--ink-3);margin-top:3px'>국가에 낼 돈이며 회사 수익이 아닙니다</div></div>"+
+    "<div class='sum-chip'>합계 (입금 기준)<b class='tnum'>"+moneyWon(sum)+"</b></div>"+
+    "<div class='sum-chip'>입금완료<b class='tnum'>"+moneyMan(doneSum)+"</b></div><div class='sum-chip'>입금대기<b class='tnum'>"+moneyMan(sum-doneSum)+"</b></div><div class='sum-chip'>계산서 미발행 "+tax.n+"건<b class='tnum'>"+moneyMan(tax.sum)+"</b></div></div><div class='tbl-scroll'>";
   if (!list.length) html += "<div class='empty'>매출 내역이 없습니다.</div>";
-  else { html += "<table><thead><tr><th>날짜</th><th>고객사</th><th>항목</th><th class='r'>금액</th><th class='c'>상태</th><th class='c'>세금계산서</th><th>프로젝트</th><th class='r'>관리</th></tr></thead><tbody>";
+  else { html += "<table><thead><tr><th>날짜</th><th>고객사</th><th>항목</th><th class='r'>공급가액</th><th class='r'>부가세</th><th class='r'>합계</th><th class='c'>상태</th><th class='c'>세금계산서</th><th>프로젝트</th><th class='r'>관리</th></tr></thead><tbody>";
     list.forEach(function(r){
       var done = r.status==="입금완료";
       var ts = taxStatus(r);
       var taxOpts = ["미발행","발행완료","불필요"].map(function(s){ return "<option"+(s===ts?" selected":"")+">"+esc(s)+"</option>"; }).join("");
-      html += "<tr><td class='tnum'>"+esc(String(r.date||"").slice(0,10))+"</td><td>"+esc(r.client||"")+"</td><td>"+esc(r.item||"")+"</td><td class='r tnum'>"+moneyWon(r.amount)+"</td>"+
+      var est = !hasSupply(r.supply);
+      var mark = est ? "<span style='color:var(--ink-3)'>≈</span> " : "";
+      var tip = est ? " title='공급가액이 입력되지 않아 합계÷1.1로 추정한 값입니다'" : "";
+      html += "<tr><td class='tnum'>"+esc(String(r.date||"").slice(0,10))+"</td><td>"+esc(r.client||"")+"</td><td>"+esc(r.item||"")+"</td>"+
+        "<td class='r tnum'"+tip+">"+mark+moneyWon(revSupply(r))+"</td>"+
+        "<td class='r tnum'"+tip+" style='color:var(--ink-2)'>"+mark+moneyWon(rvat(r))+"</td>"+
+        "<td class='r tnum'>"+moneyWon(r.amount)+"</td>"+
         "<td class='c'><button class='st-badge "+(done?"done":"wait")+"' data-status='"+r.id+"' title='클릭하여 상태 전환'>"+esc(r.status||"입금대기")+"</button></td>"+
         "<td class='c'><select class='tax-sel "+taxCls(ts)+"' data-tax='"+r.id+"' title='세금계산서 상태 변경'>"+taxOpts+"</select></td>"+
         "<td style='color:var(--ink-3)'>"+esc(r.project||"")+"</td>"+
         "<td class='r'><div class='row-actions'><button class='icon-btn' data-edit='"+r.id+"'>✎</button><button class='icon-btn del' data-del='"+r.id+"'>🗑</button></div></td></tr>";
     });
-    html += "</tbody><tfoot><tr><td colspan='3' style='font-weight:700'>합계</td><td class='r tnum'>"+moneyWon(sum)+"</td><td colspan='4'></td></tr></tfoot></table>"; }
+    html += "</tbody><tfoot><tr><td colspan='3' style='font-weight:700'>합계</td><td class='r tnum'>"+moneyWon(supSum)+"</td><td class='r tnum'>"+moneyWon(vatSum)+"</td><td class='r tnum'>"+moneyWon(sum)+"</td><td colspan='4'></td></tr></tfoot></table>"; }
   html += "</div></section>";
   C.innerHTML = html;
   C.querySelector("[data-add]").onclick = function(){ openForm("revenue", null); };
@@ -4997,6 +5014,10 @@ function bindExpenseChart(){
 function renderExpenses(){
   var d = state.data, list = (d.expense||[]).slice().sort(function(a,b){ return String(b.date||"").localeCompare(String(a.date||"")); });
   var sum = list.reduce(function(a,x){return a+(Number(x.amount)||0);},0);
+  /* 부가세는 vat 컬럼이 채워져 있으면 그대로, 비면 합계−공급가액(=0)이다 — 면세·간이영수증이 그렇다. */
+  function xvat(x){ return hasSupply(x && x.vat) ? (Number(x.vat)||0) : ((Number(x&&x.amount)||0) - expSupply(x)); }
+  var supSum = list.reduce(function(a,x){ return a+expSupply(x); },0);
+  var vatSum = list.reduce(function(a,x){ return a+xvat(x); },0);
   var byCat = {};
   list.forEach(function(x){ var c=x.category||"기타"; byCat[c]=(byCat[c]||0)+(Number(x.amount)||0); });
   var html = pageHead("expenses","", "<button class='btn primary' data-add>+ 지출 추가</button>");
@@ -5012,10 +5033,17 @@ function renderExpenses(){
   Object.keys(byCat).sort(function(a,b){return byCat[b]-byCat[a];}).forEach(function(c){ chips += "<div class='sum-chip'>"+esc(c)+"<b class='tnum'>"+moneyMan(byCat[c])+"</b></div>"; });
   html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>개별 지출</div><h3>단건 지출 내역</h3></div></div><div class='sum-strip'>"+chips+"</div><div class='tbl-scroll'>";
   if (!list.length) html += "<div class='empty'>지출 내역이 없습니다.</div>";
-  else { html += "<table><thead><tr><th>날짜</th><th>거래처</th><th>항목</th><th>분류</th><th class='r'>금액</th><th class='r'>관리</th></tr></thead><tbody>";
-    list.forEach(function(x){ html += "<tr><td class='tnum'>"+esc(String(x.date||"").slice(0,10))+"</td><td>"+esc(x.vendor||"")+"</td><td>"+esc(x.item||"")+"</td><td><span class='mini-tag vfx'>"+esc(x.category||"기타")+"</span></td><td class='r tnum'>"+moneyWon(x.amount)+"</td>"+
+  else { html += "<table><thead><tr><th>날짜</th><th>거래처</th><th>항목</th><th>분류</th><th class='r'>공급가액</th><th class='r'>부가세</th><th class='r'>합계</th><th class='r'>관리</th></tr></thead><tbody>";
+    list.forEach(function(x){
+      var est = !hasSupply(x.supply);
+      var mark = est ? "<span style='color:var(--ink-3)'>≈</span> " : "";
+      var tip = est ? " title='공급가액이 입력되지 않아 총액을 그대로 공급가액으로 봅니다 (면세·간이영수증 가능)'" : "";
+      html += "<tr><td class='tnum'>"+esc(String(x.date||"").slice(0,10))+"</td><td>"+esc(x.vendor||"")+"</td><td>"+esc(x.item||"")+"</td><td><span class='mini-tag vfx'>"+esc(x.category||"기타")+"</span></td>"+
+      "<td class='r tnum'"+tip+">"+mark+moneyWon(expSupply(x))+"</td>"+
+      "<td class='r tnum'"+tip+" style='color:var(--ink-2)'>"+mark+moneyWon(xvat(x))+"</td>"+
+      "<td class='r tnum'>"+moneyWon(x.amount)+"</td>"+
       "<td class='r'><div class='row-actions'><button class='icon-btn' data-edit='"+x.id+"'>✎</button><button class='icon-btn del' data-del='"+x.id+"'>🗑</button></div></td></tr>"; });
-    html += "</tbody><tfoot><tr><td colspan='4' style='font-weight:700'>합계</td><td class='r tnum'>"+moneyWon(sum)+"</td><td></td></tr></tfoot></table>"; }
+    html += "</tbody><tfoot><tr><td colspan='4' style='font-weight:700'>합계</td><td class='r tnum'>"+moneyWon(supSum)+"</td><td class='r tnum'>"+moneyWon(vatSum)+"</td><td class='r tnum'>"+moneyWon(sum)+"</td><td></td></tr></tfoot></table>"; }
   html += "</div></section>";
   C.innerHTML = html;
   C.querySelector("[data-add]").onclick = function(){ openForm("expense", null); };
@@ -5116,6 +5144,55 @@ function ytdCardHTML(){
       "<div class='prog'><i style='width:"+pct.toFixed(1)+"%'></i></div></div>";
   });
   h += "</div></div></section>";
+  return h;
+}
+
+/* ============ 부가가치세 예상 납부액 ============
+   매출세액은 status 와 무관하게 전부 더한다 — 부가세는 입금이 아니라 세금계산서 발행 기준으로 낸다.
+   매입세액은 expense 의 vat 만 더한다. 법인카드(cards)·외주 인건비(payouts)·고정경비(fixedcost)는
+   세금계산서·신용카드매입세액공제 요건을 코드가 판정할 수 없고 해외결제는 애초에 공제 대상이 아니라 넣지 않는다.
+   연도 판정은 ytdProfit() 과 같다(올해 && 현재월까지). */
+function vatEstimate(){
+  var d = state.data, now = new Date();
+  var Y = now.getFullYear(), M = now.getMonth()+1;
+  function inYtd(k){ return /^\d{4}-\d{2}$/.test(k) && Number(k.slice(0,4))===Y && Number(k.slice(5,7))<=M; }
+  function keyOf(s){ var dt = parseDate(s); return dt ? dt.getFullYear()+"-"+pad2(dt.getMonth()+1) : ""; }
+  var o = { year:Y, month:M, day:now.getDate(), out:0, inp:0 };
+  (d.revenue||[]).forEach(function(r){
+    if (!inYtd(keyOf(r.date))) return;
+    o.out += hasSupply(r.vat) ? (Number(r.vat)||0) : ((Number(r.amount)||0) - revSupply(r));
+  });
+  (d.expense||[]).forEach(function(x){
+    if (!inYtd(keyOf(x.date))) return;
+    o.inp += Number(x.vat)||0;
+  });
+  o.due = o.out - o.inp;
+  return o;
+}
+function vatCardHTML(){
+  var v = vatEstimate();
+  var refund = v.due < 0;
+  var col = refund ? "var(--pos)" : "var(--pending)";
+  function line(lb, val, sign){
+    return "<div style='display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:5px 0;font-size:13.5px'>"+
+      "<span style='color:var(--ink-2)'>"+lb+"</span>"+
+      "<span class='tnum' style='font-weight:700'>"+(sign||"")+moneyWon(val)+"</span></div>";
+  }
+  var h = "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>세금</div>"+
+    "<h3>부가가치세 예상</h3></div>"+
+    "<div class='sec-note'>"+v.year+"년 현재까지</div></div>"+
+    "<div style='padding:16px 20px 20px'>";
+  h += line("매출세액", v.out, "");
+  h += line("매입세액", v.inp, "− ");
+  h += "<div style='border-top:1px solid var(--line-strong);margin:12px 0 14px'></div>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:baseline;gap:14px'>"+
+    "<span style='font-weight:800;font-size:16px'>"+(refund?"환급 예상":"납부 예상")+"</span>"+
+    "<span class='tnum' style='font-size:38px;font-weight:800;line-height:1.15;color:"+col+"'>"+moneyWon(Math.abs(v.due))+"</span></div>";
+  h += "<div style='margin-top:14px;font-size:12px;color:var(--ink-2);line-height:1.7'>"+
+    "※ 입금 대기 건도 세금계산서 발행 기준으로 포함했습니다"+
+    "<br>※ 카드·해외결제 등 세금계산서가 없는 매입은 공제되지 않습니다"+
+    "<br>※ 확정 금액은 세무대리인 신고 기준입니다</div>";
+  h += "</div></section>";
   return h;
 }
 
