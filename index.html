@@ -5545,8 +5545,15 @@ function renderFestivals(){
   bindFold(C);
 }
 
-/* ---- AI 공모전 ---- */
+/* ---- AI 공모전 ----
+   1순위는 AI 레이더가 매일 직접 수집한 스냅샷이다. 같은 GitHub Pages 계정이라 동일 출처이고,
+   2026-08-15 자체수집 전환으로 건수가 크게 늘었다(국내 진행중 39 → 280, 해외 36 → 89).
+   2순위(폴백)는 예전에 쓰던 남의 저장소다 — AI 레이더 수집이 실패한 날에도 화면이 비지 않게 남겨 둔다. */
 var CONTEST_URLS = {
+  domestic: "https://kjyart-star.github.io/ai-radar/data/contests.json",
+  overseas: "https://kjyart-star.github.io/ai-radar/data/overseas-contests.json"
+};
+var CONTEST_URLS_FALLBACK = {
   domestic: "https://junyeo217.github.io/ai-contest-board/data/contests.json",
   overseas: "https://junyeo217.github.io/ai-contest-board/data/overseas-contests.json"
 };
@@ -5560,9 +5567,18 @@ function cachedContests(kind){ var c = contestCache[kind]; return c ? c.data : n
 function fetchContests(kind, force){
   var c = contestCache[kind];
   if (!force && c) return Promise.resolve(c.data);
-  return fetch(CONTEST_URLS[kind], { cache:"no-store" }).then(function(r){
-    if (!r.ok) throw new Error("HTTP "+r.status);
-    return r.json();
+  /* 스냅샷이 없거나 형식이 깨졌으면 예전 소스로 한 번 더 시도한다. 둘 다 실패해야 에러다. */
+  function pull(url){
+    return fetch(url, { cache:"no-store" }).then(function(r){
+      if (!r.ok) throw new Error("HTTP "+r.status);
+      return r.json();
+    }).then(function(j){
+      if (!j || !j.sections) throw new Error("형식 오류");
+      return j;
+    });
+  }
+  return pull(CONTEST_URLS[kind]).catch(function(){
+    return pull(CONTEST_URLS_FALLBACK[kind]);
   }).then(function(j){ contestCache[kind] = { t:Date.now(), data:j }; return j; });
 }
 function ctSafeUrl(u){ try { var p = new URL(String(u||"")); return (p.protocol === "http:" || p.protocol === "https:") ? p.href : ""; } catch(e){ return ""; } }
