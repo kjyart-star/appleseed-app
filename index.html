@@ -2428,7 +2428,9 @@ function openForm(table, row, defaults){
     }
   };
 }
-function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses",cards:"expenses",offset:"expenses",payouts:"expenses",payroll:"expenses",taxdue:"taxdue"}; return m[t]||t; }
+/* 모달 제목을 TITLES 에서 찾을 때 쓴다. 여기 빠진 테이블은 제목이 영문 키로 노출되므로
+   새 테이블을 만들 때마다 반드시 등록할 것. (insurance·atts·board 가 그렇게 빠져 있었다) */
+function routeForTable(t){ var m={revenue:"revenue",expense:"expenses",projects:"projects",actions:"todos",calendar:"calendar",meetings:"meetings",clients:"clients",memos:"memos",subs:"subs",fixedcost:"expenses",cards:"expenses",offset:"expenses",payouts:"expenses",payroll:"expenses",taxdue:"taxdue",insurance:"company",company:"company",atts:"projects",board:"library"}; return m[t]||t; }
 
 async function delRow(table, id){
   var ok = await confirmDlg("정말 삭제할까요? 되돌릴 수 없습니다.", "삭제", "삭제 확인");
