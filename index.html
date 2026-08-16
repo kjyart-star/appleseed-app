@@ -1180,7 +1180,7 @@ var state = { data:null, mask: localStorage.getItem("appleseed_mask")==="1", loa
    mail=수신부 지메일, homepage=수신부 방문집계, contests=공모전 보드, gov=K-Startup.
    (넷 다 state.data 를 한 글자도 읽지 않는다 — 확인함) 시트가 갱신됐다고 이 화면을
    다시 그리면 얻는 것은 없고 남의 API 요청과 깜박임만 늘어난다. */
-var SELF_FETCH_ROUTES = { mail:1, inquiries:1, homepage:1, contests:1, gov:1 };
+var SELF_FETCH_ROUTES = { mail:1, inquiries:1, homepage:1, airadar:1, contests:1, gov:1 };
 
 /* 데이터 지문. 문자열을 통째로 들고 있지 않으려고 djb2 해시 + 길이로 줄인다.
    해시가 충돌하면 그 회차 갱신 한 번을 건너뛰지만, 다음 변경에서 곧바로 달라진다.
@@ -1599,7 +1599,7 @@ var MENU = [
   { cap:"업무", items:[ ["todos","✅","할일관리",0], ["calendar","📅","일정관리",0], ["meetings","🎙️","전사록",0], ["memos","📝","메모관리",0], ["mail","✉️","메일관리",0] ] },
   /* 의뢰관리가 고객관리 앞에 있는 이유: 의뢰 → 고객 → 프로젝트 순으로 파이프라인이 흐른다.
      메뉴 순서가 일하는 순서와 같아야 어디를 봐야 할지 생각하지 않게 된다. */
-  { cap:"영업", items:[ ["inquiries","📨","의뢰관리",0], ["clients","🤝","고객관리",0], ["projects","🎬","프로젝트관리",0], ["homepage","🌐","홈페이지",0] ] },
+  { cap:"영업", items:[ ["inquiries","📨","의뢰관리",0], ["clients","🤝","고객관리",0], ["projects","🎬","프로젝트관리",0], ["homepage","🌐","홈페이지",0], ["airadar","📡","AI 레이더",0] ] },
   { cap:"재무", items:[ ["revenue","💰","매출관리",0], ["deposits","🏦","입금관리",0], ["expenses","🧾","지출관리",0], ["profit","📈","영업이익분석",0], ["subs","🔁","AI 구독관리",0],
       ["quotes","📄","견적관리",1], ["econtract","✍️","전자계약",1], ["expreq","📥","지출요청",1], ["cardhist","💳","카드사용내역",0] ] },
   { cap:"교육", items:[ ["edupipe","🎓","교육 파이프라인",1], ["instructors","👩‍🏫","강사관리",1] ] },
@@ -6934,6 +6934,189 @@ function hpLoad(){
   });
 }
 
+/* ============ AI 레이더 (ai-radar.kr) 방문·유입 현황 ============
+   홈페이지 뷰(renderHomepage)와 같은 룩·CSS 클래스·hp* 헬퍼(hpChartSVG·hpBarListHTML)를
+   그대로 재사용한다. 데이터 출처만 다르다 — 여기는 AI 레이더 Firebase 의 공개 컬렉션을
+   Firestore REST 로 직접 읽는다(관리시트가 아니다 → SELF_FETCH_ROUTES 에 등록).
+   AI 레이더엔 B2B 리드가 없어 리드/전환율 자리는 커뮤니티(게시글·작품)·오늘 페이지뷰로 바꿨다.
+
+   AI 레이더 공개 설정(비밀 아님, read:true 공개 컬렉션만) — projectId·apiKey 는 클라이언트에
+   노출돼도 되는 Firebase 웹 설정값이다. 쓰기 권한은 없다(보안 규칙이 공개 컬렉션 읽기만 허용). */
+var AR_PROJECT = "ai-radar-74be8";
+var AR_KEY = "AIzaSyCj1T3puOwcRismiRMcx3Yoip0IwYiEcDM";
+var AR_FS = "https://firestore.googleapis.com/v1/projects/"+AR_PROJECT+"/databases/(default)/documents";
+var arPeriod = 7;                 /* 홈페이지 hpPeriod 와 독립 — 두 화면의 기간이 서로 안 섞이게 */
+var arCache = null;               /* {t, data} · data={daily,src,posts,works} */
+var AR_TTL = 5*60*1000;
+
+/* Firestore 값 파서 — integerValue/doubleValue 어느 쪽이 와도 숫자로. */
+function arNum(field){
+  if (!field) return 0;
+  return Number(field.integerValue != null ? field.integerValue : (field.doubleValue != null ? field.doubleValue : 0)) || 0;
+}
+/* KST(UTC+9) 기준 daysAgo 일 전의 YYYY-MM-DD. statsJson_ 의 날짜 키 생성과 같은 방식. */
+function arDateKey(daysAgo){
+  var d = new Date(Date.now() + 9*3600*1000 - daysAgo*86400000);
+  return d.toISOString().slice(0,10);
+}
+/* daily 맵(날짜→{pageviews,visitors})을 period 길이의 days[](오래된→오늘)로. 없는 날짜는 0. */
+function arBuildDays(dailyMap, period){
+  var out = [];
+  for (var i=period-1; i>=0; i--){
+    var k = arDateKey(i);
+    var rec = dailyMap[k] || { pageviews:0, visitors:0 };
+    out.push({ date:k, pageviews:Number(rec.pageviews)||0, visitors:Number(rec.visitors)||0, leads:0 });
+  }
+  return out;
+}
+/* 유입 출처 키 → 한글 라벨 */
+function arSrcLabel(key){
+  var map = { direct:"직접 방문", google:"구글", naver:"네이버", chatgpt:"ChatGPT", youtube:"유튜브", instagram:"인스타그램", sns:"SNS", other:"기타" };
+  if (map[key]) return map[key];
+  if (String(key).indexOf("utm:") === 0) return "UTM: " + String(key).slice(4);
+  return String(key);
+}
+
+/* posts/works 문서 수 — runAggregationQuery(count). 실패 시 null(칸만 "—"). */
+function arAgg(coll){
+  var body = JSON.stringify({ structuredAggregationQuery:{ structuredQuery:{ from:[{ collectionId:coll }] }, aggregations:[{ alias:"c", count:{} }] } });
+  return fetch(AR_FS+":runAggregationQuery?key="+AR_KEY, { method:"POST", headers:{ "Content-Type":"application/json" }, body:body, cache:"no-store" })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var v = j && j[0] && j[0].result && j[0].result.aggregateFields && j[0].result.aggregateFields.c;
+      return v ? (Number(v.integerValue)||0) : null;
+    })
+    .catch(function(){ return null; });
+}
+
+/* 방문 일별 + 유입 + 커뮤니티 수를 한 번에. 5분 캐시. 각 조각은 실패해도 null 로 두고 전체는 안 깨진다. */
+function arFetch(){
+  if (arCache && (Date.now()-arCache.t) < AR_TTL) return Promise.resolve(arCache.data);
+  var dailyP = fetch(AR_FS+"/analytics_daily?key="+AR_KEY+"&pageSize=400", { cache:"no-store" })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var map = {};
+      (j.documents||[]).forEach(function(d){
+        var seg = d.name.split("/").pop(), f = d.fields||{};
+        map[seg] = { pageviews: arNum(f.pageviews), visitors: arNum(f.visitors) };
+      });
+      return map;
+    })
+    .catch(function(){ return null; });
+  var srcP = fetch(AR_FS+"/analytics_src?key="+AR_KEY+"&pageSize=200", { cache:"no-store" })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var arr = [];
+      (j.documents||[]).forEach(function(d){
+        var seg = d.name.split("/").pop(), f = d.fields||{};
+        arr.push({ key:seg, count: arNum(f.count) });
+      });
+      arr.sort(function(a,b){ return b.count - a.count; });
+      return arr;
+    })
+    .catch(function(){ return null; });
+  return Promise.all([ dailyP, srcP, arAgg("posts"), arAgg("works") ]).then(function(res){
+    var data = { daily:res[0], src:res[1], posts:res[2], works:res[3] };
+    arCache = { t:Date.now(), data:data };
+    return data;
+  });
+}
+
+/* KPI 5장 — hpCardsHTML 과 같은 kpi/big/tnum/meta 마크업. 리드 자리 → 커뮤니티·오늘 페이지뷰. */
+function arCardsHTML(data){
+  var daily = data.daily || {};
+  var days7 = arBuildDays(daily, 7);
+  var todayRec = days7[days7.length-1] || { visitors:0, pageviews:0 };
+  var todayV = Number(todayRec.visitors)||0, todayPv = Number(todayRec.pageviews)||0;
+  var week = 0; days7.forEach(function(d){ week += Number(d.visitors)||0; });
+  var totalV = 0; Object.keys(daily).forEach(function(k){ totalV += Number(daily[k].visitors)||0; });
+  var posts = data.posts, works = data.works;
+  var commVal = (posts==null && works==null) ? "—" : comma((posts||0)+(works||0));
+  var commMeta = (posts==null && works==null) ? "확인 불가" : ("게시글 "+comma(posts||0)+" · 작품 "+comma(works||0));
+  return "<div class='kpi'><div class='label'>오늘 방문</div><div class='big tnum'>"+comma(todayV)+"</div><div class='meta'>방문자 기준</div></div>"+
+    "<div class='kpi'><div class='label'>이번 주 방문</div><div class='big tnum'>"+comma(week)+"</div><div class='meta'>최근 7일 방문자</div></div>"+
+    "<div class='kpi'><div class='label'>누적 방문</div><div class='big tnum'>"+comma(totalV)+"</div><div class='meta'>전체 방문자</div></div>"+
+    "<div class='kpi k-ar'><div class='label'>커뮤니티</div><div class='big tnum'>"+commVal+"</div><div class='meta'>"+commMeta+"</div></div>"+
+    "<div class='kpi k-profit'><div class='label'>오늘 페이지뷰</div><div class='big tnum'>"+comma(todayPv)+"</div><div class='meta'>오늘 조회수</div></div>";
+}
+
+/* 기간 칩 — hpChipsHTML 과 같은 proj-chip 문법, 단 arPeriod·data-ar-period 로 상태 독립. */
+function arChipsHTML(){
+  return [[7,"1주"],[30,"1달"],[365,"년"]].map(function(p){
+    return "<button class='proj-chip"+(p[0]===arPeriod?" on":"")+"' data-ar-period='"+p[0]+"'>"+p[1]+"</button>";
+  }).join("");
+}
+/* 유입 분석 — hpBarListHTML 재사용(라벨만 arSrcLabel). 나라별은 클라이언트에서 IP 를 못 얻어 제외. */
+function arTrafficHTML(data){
+  return "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>유입 분석</div><h3>어디서 왔나</h3></div><div class='sec-note'>누적 · 방문 유입경로</div></div>"+
+    "<div style='padding:16px'><div class='eyebrow' style='margin-bottom:8px'>유입 경로</div>"+
+    hpBarListHTML(data.src||[], function(x){ return arSrcLabel(x.key); })+
+    "</div></section>";
+}
+/* 방문이 아직 없을 때 — 깨지지 말고 수집 대기 안내(hpWaitingHTML 패턴). */
+function arWaitingHTML(){
+  return "<section class='panel' style='background:transparent;border:0;box-shadow:none'><div class='placeholder'>"+
+    "<div class='ico'>📡</div><h3>방문 수집 대기 중</h3>"+
+    "<p>ai-radar.kr 은 이제 막 집계를 시작해 아직 방문 데이터가 적습니다.<br>"+
+    "방문이 쌓이면 이 자리에 일별 방문자 추이가 나타납니다.<br>"+
+    "<span style='color:var(--ink-3)'>집계는 연동 시점부터 시작됩니다 — 과거 방문치는 0에서 출발합니다.</span></p></div></section>";
+}
+/* 선택 기간으로 차트·합계 갱신(hpChartSVG 재사용, days[] 구조 동일). */
+function arPaintChart(data){
+  var box = C.querySelector("[data-ar-chart]"), sum = C.querySelector("[data-ar-sum]");
+  if (!box) return;
+  var days = arBuildDays(data.daily||{}, arPeriod);
+  box.innerHTML = hpChartSVG(days, arPeriod);
+  if (sum){
+    var pv=0, v=0; days.forEach(function(d){ pv += Number(d.pageviews)||0; v += Number(d.visitors)||0; });
+    sum.innerHTML = "방문자 <b style='color:var(--ink)'>"+comma(v)+"</b> · 페이지뷰 "+comma(pv);
+  }
+}
+
+function renderAiRadar(){
+  var actions = "<button class='btn sm ghost' data-ar-reload>다시 확인</button>"+
+    "<a class='btn sm' style='text-decoration:none' href='https://ai-radar.kr' target='_blank' rel='noopener'>사이트 열기 ↗</a>";
+  var html = pageHead("airadar", "ai-radar.kr 방문·페이지뷰·유입 현황 (자체 집계)", actions);
+  html += "<div data-ar-body><div class='empty' style='padding:60px 20px'>AI 레이더 통계를 불러오는 중…</div></div>";
+  C.innerHTML = html;
+  arLoad();
+}
+function arLoad(){
+  arFetch().then(function(data){
+    if (curRoute() !== "airadar") return;                         /* 화면을 떠났으면 그리지 않음 */
+    var body = C.querySelector("[data-ar-body]"); if (!body) return;
+    var daily = data.daily || {};
+    var hasAny = Object.keys(daily).some(function(k){ return (Number(daily[k].visitors)||0)>0 || (Number(daily[k].pageviews)||0)>0; });
+    var chartInner = hasAny
+      ? "<div class='chart-body'><div class='chart-scroll' data-ar-chart></div></div>"
+      : arWaitingHTML();
+    body.innerHTML =
+      "<div class='kpis hp5'>"+arCardsHTML(data)+"</div>"+
+      "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>방문 추이</div><h3>일별 방문자</h3></div>"+
+      "<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'><span class='sec-note' data-ar-sum></span>"+arChipsHTML()+"</div></div>"+
+      chartInner+"</section>"+
+      arTrafficHTML(data);
+    if (hasAny){
+      arPaintChart(data);
+      body.querySelectorAll("[data-ar-period]").forEach(function(b){
+        b.onclick = function(){
+          arPeriod = Number(b.getAttribute("data-ar-period"));
+          var p = arPeriod;
+          body.querySelectorAll("[data-ar-period]").forEach(function(c){ c.classList.toggle("on", Number(c.getAttribute("data-ar-period"))===p); });
+          arPaintChart(data);
+        };
+      });
+    }
+    var rb = body.querySelector("[data-ar-reload]");
+    if (rb) rb.onclick = function(){ arCache = null; renderAiRadar(); };
+    applyMask();
+  }).catch(function(){
+    if (curRoute() !== "airadar") return;
+    var body = C.querySelector("[data-ar-body]");
+    if (body) body.innerHTML = arWaitingHTML();
+  });
+}
+
 /* ============ 메일관리 — 대표 지메일 받은편지함 + 회신 ============
    수신부 action=mail / mailPreview / mailReply 가 어드민 이메일 일치만 통과시킨다
    (등급으로 열지 않음 — 개인 메일함). 화면에서도 같은 게이트를 걸어 오해가 없게 한다.
@@ -8227,7 +8410,7 @@ var ROUTES = {
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
   newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov,
   subs:renderSubs, library:renderLibrary, homepage:renderHomepage, cardhist:renderCardHist,
-  company:renderCompany, taxdue:renderTaxdue
+  company:renderCompany, taxdue:renderTaxdue, airadar:renderAiRadar
 };
 /* 마스터 키 오류 화면 — 금고(config/portal)의 키를 수신부(GAS)가 거부했을 때.
    키 수동 입력 게이트는 제거됨 — 어드민만 여기서 새 키를 금고에 재등록할 수 있다. */
