@@ -1180,7 +1180,7 @@ var state = { data:null, mask: localStorage.getItem("appleseed_mask")==="1", loa
    mail=수신부 지메일, homepage=수신부 방문집계, contests=공모전 보드, gov=K-Startup.
    (넷 다 state.data 를 한 글자도 읽지 않는다 — 확인함) 시트가 갱신됐다고 이 화면을
    다시 그리면 얻는 것은 없고 남의 API 요청과 깜박임만 늘어난다. */
-var SELF_FETCH_ROUTES = { mail:1, inquiries:1, homepage:1, airadar:1, contests:1, gov:1 };
+var SELF_FETCH_ROUTES = { mail:1, inquiries:1, homepage:1, airadar:1, contests:1, gov:1, brain:1 };
 
 /* 데이터 지문. 문자열을 통째로 들고 있지 않으려고 djb2 해시 + 길이로 줄인다.
    해시가 충돌하면 그 회차 갱신 한 번을 건너뛰지만, 다음 변경에서 곧바로 달라진다.
@@ -1595,7 +1595,7 @@ document.addEventListener("mousemove", function(e){
 
 /* ============ 메뉴 ============ */
 var MENU = [
-  { cap:"현황", items:[ ["dashboard","📊","대시보드",0] ] },
+  { cap:"현황", items:[ ["dashboard","📊","대시보드",0], ["brain","🧠","회사 브레인",0] ] },
   { cap:"업무", items:[ ["todos","✅","할일관리",0], ["calendar","📅","일정관리",0], ["meetings","🎙️","전사록",0], ["memos","📝","메모관리",0], ["mail","✉️","메일관리",0] ] },
   /* 의뢰관리가 고객관리 앞에 있는 이유: 의뢰 → 고객 → 프로젝트 순으로 파이프라인이 흐른다.
      메뉴 순서가 일하는 순서와 같아야 어디를 봐야 할지 생각하지 않게 된다. */
@@ -2986,6 +2986,171 @@ function renderMemos(){
   C.innerHTML = html;
   C.querySelector("[data-add]").onclick = function(){ openForm("memos", null); };
   bindRowActions(C, "memos", d.memos);
+}
+
+/* ============ 🧠 회사 브레인 (통합 검색 + 빠른 캡처) ============
+   노션 COMPANY OS 가 정본. 이 화면은 검색·입력 창구다.
+   - 검색: 로그인 시 이미 로드된 state.data(시트 전체) + data/notion-brain.json(노션 지식 스냅샷)을
+     클라이언트에서 훑는다(서버 호출 없음).
+   - 캡처: 적은 내용을 memos 테이블에 즉시 저장(crud POST). */
+var bnBrain = null;      /* notion-brain.json 캐시(한 번만 로드) */
+var bnFlash = "";        /* 저장 안내 메시지 — crud 의 동기 render() 이후에도 살아남게 모듈 변수로 보관 */
+function bnLoadBrain(cb){
+  if (bnBrain){ cb(); return; }
+  fetch("./data/notion-brain.json", { cache:"no-store" })
+    .then(function(r){ return r.json(); })
+    .then(function(j){ bnBrain = j || { items:[] }; cb(); })
+    .catch(function(){ cb(); });   /* 실패해도 시트 검색은 정상 동작(브레인 그룹만 생략) */
+}
+/* 매칭된 부분 주변 ~80자 발췌 + 검색어 하이라이트(esc 로 각 조각을 이스케이프 → XSS 안전) */
+function bnExcerpt(text, ql){
+  text = String(text==null?"":text);
+  var lc = text.toLowerCase(), i = lc.indexOf(ql);
+  if (i < 0) i = 0;
+  var start = Math.max(0, i - 24);
+  var seg = text.slice(start, start + 80);
+  return (start > 0 ? "…" : "") + bnHi(seg, ql) + (start + 80 < text.length ? "…" : "");
+}
+function bnHi(text, ql){
+  text = String(text==null?"":text);
+  var lc = text.toLowerCase(), out = "", idx = 0, p;
+  while ((p = lc.indexOf(ql, idx)) >= 0){
+    out += esc(text.slice(idx, p)) + "<mark>" + esc(text.slice(p, p + ql.length)) + "</mark>";
+    idx = p + ql.length;
+  }
+  return out + esc(text.slice(idx));
+}
+/* fields 가 있으면 그 필드들만, 없으면(자료실) 모든 문자열 값을 훑어 매칭된 원문을 돌려준다 */
+function bnMatch(row, fields, ql){
+  if (fields){
+    for (var i=0;i<fields.length;i++){
+      var v = row[fields[i]];
+      if (v != null && String(v).toLowerCase().indexOf(ql) >= 0) return String(v);
+    }
+    return null;
+  }
+  for (var k in row){
+    if (!row.hasOwnProperty(k)) continue;
+    var val = row[k];
+    if (typeof val === "string" && val.toLowerCase().indexOf(ql) >= 0) return val;
+  }
+  return null;
+}
+function renderBrain(){
+  var html = pageHead("brain",
+    "회사 데이터·지식을 한곳에서 저장하고 검색합니다 — 노션 COMPANY OS 연결", "");
+  /* (a) 빠른 저장(캡처) */
+  html += "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>빠른 저장 (캡처)</div>"+
+      "<h3>생각·정보를 바로 메모로 남기기</h3>"+
+      "<div class='sec-note' style='margin-top:4px'>여기 적은 것은 메모로 저장되고, 판단·원칙으로 남길 것은 세션에서 노션 BRAIN으로 올라갑니다.</div>"+
+    "</div></div>"+
+    "<div class='fld' style='margin-top:10px'><label for='bnCapTitle'>제목 (선택)</label>"+
+      "<input id='bnCapTitle' type='text' autocomplete='off' placeholder='제목을 비워두면 내용 앞부분이 제목이 됩니다'></div>"+
+    "<div class='fld' style='margin-top:10px'><label for='bnCapBody'>내용</label>"+
+      "<textarea id='bnCapBody' placeholder='메모로 남길 내용을 적으세요'></textarea></div>"+
+    "<div class='row-actions' style='justify-content:flex-end; align-items:center; gap:10px; margin-top:10px'>"+
+      "<span id='bnCapMsg' class='sec-note'></span>"+
+      "<button class='btn primary' id='bnCapSave'>저장</button></div>"+
+  "</section>";
+  /* (b) 통합 검색 */
+  html += "<section class='panel'>"+
+    "<div class='sec-head'><div><div class='eyebrow'>통합 검색</div>"+
+      "<h3>회사 데이터·지식 한 번에 찾기</h3></div></div>"+
+    "<div class='proj-search-wrap' style='margin-top:10px'><span class='search-icon'>🔍</span>"+
+      "<input class='proj-search' id='bnSearch' type='search' autocomplete='off' spellcheck='false' "+
+        "placeholder='판단 기준·메모·회의·프로젝트·고객·리포트를 한 번에 검색'></div>"+
+    "<div id='bnResults' style='margin-top:14px'></div>"+
+  "</section>";
+  C.innerHTML = html;
+
+  /* 저장 안내 메시지(캡처 후 crud 가 화면을 다시 그려도 유지) */
+  var msgEl = C.querySelector("#bnCapMsg");
+  if (bnFlash && msgEl) msgEl.textContent = bnFlash;
+
+  /* --- 캡처 저장 --- */
+  var titleEl = C.querySelector("#bnCapTitle");
+  var bodyEl = C.querySelector("#bnCapBody");
+  C.querySelector("#bnCapSave").onclick = function(){
+    var body = (bodyEl.value || "").trim();
+    if (!body){ bodyEl.focus(); return; }
+    var title = (titleEl.value || "").trim() || body.slice(0, 20);
+    bnFlash = "저장했습니다 — 메모관리에 쌓입니다.";
+    setTimeout(function(){ bnFlash = ""; var e = document.querySelector("#bnCapMsg"); if (e) e.textContent = ""; }, 4000);
+    crud("POST", "memos", null, { title: title, content: body });   /* 내부에서 동기 render() → 이 화면 재생성 */
+  };
+
+  /* --- 통합 검색 --- */
+  var searchEl = C.querySelector("#bnSearch");
+  var resEl = C.querySelector("#bnResults");
+  function guideHtml(){
+    var dt = (bnBrain && bnBrain.generated)
+      ? "노션 지식 스냅샷 기준일: " + esc(bnBrain.generated) : "";
+    return "<div class='empty'>회사 데이터·지식을 검색하세요. 판단 기준·메모·회의·프로젝트·고객·리포트를 한 번에 찾습니다.</div>"+
+      "<div class='sec-note' id='bnBrainDate' style='margin-top:10px; text-align:center'>"+dt+"</div>";
+  }
+  function runSearch(){
+    var ql = (searchEl.value || "").trim().toLowerCase();
+    if (ql.length < 2){ resEl.innerHTML = guideHtml(); return; }
+    var d = state.data || {};
+    var sources = [
+      { label:"판단·원칙", list:(bnBrain && bnBrain.items) || [], fields:["title","why","type","context"],
+        title:function(o){ return o.title; }, extern:true },
+      { label:"메모", list:d.memos, fields:["title","content"], open:"#memos",
+        title:function(o){ return o.title || o.content; } },
+      { label:"회의", list:d.meetings, fields:["title","summary"], open:"#meetings",
+        title:function(o){ return o.title; } },
+      { label:"프로젝트", list:d.projects, fields:["name","client","next_action","type"], open:"#projects",
+        title:function(o){ return o.name; } },
+      { label:"고객", list:d.clients, fields:["name","contact_person","email","memo"], open:"#clients",
+        title:function(o){ return o.name; } },
+      { label:"리포트", list:d.reports, fields:["title","content"], open:"#reports",
+        title:function(o){ return o.title; } },
+      { label:"자료실", list:d.library, fields:null, open:"#library",
+        title:function(o){ return o.title || o.name || o.category || "(자료)"; } },
+      { label:"할일", list:d.actions, fields:["title"], open:"#todos",
+        title:function(o){ return o.title; } }
+    ];
+    var out = "", any = false;
+    sources.forEach(function(s){
+      var list = s.list || [], hits = [];
+      for (var i=0;i<list.length;i++){
+        var mt = bnMatch(list[i], s.fields, ql);
+        if (mt != null) hits.push({ row:list[i], mt:mt });
+      }
+      if (!hits.length) return;
+      any = true;
+      out += "<div class='eyebrow' style='margin:16px 0 6px'>"+esc(s.label)+
+        " <span style='color:var(--ink-3)'>"+hits.length+"</span></div>";
+      hits.slice(0, 20).forEach(function(h){
+        var t = String(s.title(h.row) || "(제목 없음)");
+        if (t.length > 60) t = t.slice(0, 60) + "…";
+        var open = s.extern
+          ? "<a class='btn sm ghost' href='"+esc(h.row.url || "")+"' target='_blank' rel='noopener'>열기 ↗</a>"
+          : "<a class='btn sm ghost' href='"+s.open+"'>열기</a>";
+        out += "<div style='padding:9px 0; border-bottom:1px solid var(--line-strong)'>"+
+          "<div style='display:flex; justify-content:space-between; align-items:baseline; gap:10px'>"+
+            "<div style='font-weight:700; color:var(--ink)'>"+bnHi(t, ql)+"</div>"+open+"</div>"+
+          "<div style='font-size:12.5px; color:var(--ink-2); margin-top:3px'>"+bnExcerpt(h.mt, ql)+"</div>"+
+        "</div>";
+      });
+      if (hits.length > 20) out += "<div class='sec-note' style='margin-top:6px'>+"+(hits.length-20)+"건 더</div>";
+    });
+    resEl.innerHTML = any ? out : "<div class='empty'>검색 결과가 없습니다.</div>";
+  }
+  var bnT;
+  searchEl.oninput = function(){ clearTimeout(bnT); bnT = setTimeout(runSearch, 150); };
+  resEl.innerHTML = guideHtml();
+
+  /* 노션 스냅샷 로드 후: 검색 중이면 재검색, 아니면 기준일만 갱신 */
+  bnLoadBrain(function(){
+    if ((searchEl.value || "").trim().length >= 2) runSearch();
+    else { var de = C.querySelector("#bnBrainDate"); if (de && bnBrain && bnBrain.generated) de.textContent = "노션 지식 스냅샷 기준일: " + bnBrain.generated; }
+  });
+
+  /* autofocus — 캡처 입력 중 포커스를 뺏지 않도록 비어있을 때만 */
+  var ae = document.activeElement;
+  if (!ae || ae === document.body) searchEl.focus();
 }
 
 /* ---- AI 구독관리 (서비스 등록·갱신일 체크·월 비용 합산) ---- */
@@ -8410,7 +8575,7 @@ var ROUTES = {
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
   newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov,
   subs:renderSubs, library:renderLibrary, homepage:renderHomepage, cardhist:renderCardHist,
-  company:renderCompany, taxdue:renderTaxdue, airadar:renderAiRadar
+  company:renderCompany, taxdue:renderTaxdue, airadar:renderAiRadar, brain:renderBrain
 };
 /* 마스터 키 오류 화면 — 금고(config/portal)의 키를 수신부(GAS)가 거부했을 때.
    키 수동 입력 게이트는 제거됨 — 어드민만 여기서 새 키를 금고에 재등록할 수 있다. */
