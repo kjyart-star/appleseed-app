@@ -432,6 +432,51 @@
   .rtype-badge.brief{color:var(--aicontent); background:var(--aicontent-soft);}
   @media (max-width:820px){ .rep-wrap{grid-template-columns:1fr;} }
 
+  /* ===== 자동화(수집기 현황) =====
+     상태 배지 색은 기존 의미색을 그대로 빌려온다 — pos=도는 중, urgent=실패,
+     pending=멈춤 의심. 화면마다 다른 색을 쓰면 대표가 색을 다시 배워야 한다. */
+  .auto-cards{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; padding:16px 20px 20px;}
+  .auto-card{border:1px solid var(--line); border-radius:12px; background:var(--surface-2);
+    padding:15px 16px; display:flex; flex-direction:column; gap:9px;}
+  .auto-card-top{display:flex; align-items:center; gap:8px;}
+  .auto-card-top .ico{font-size:17px;}
+  .auto-card-top .nm{font-weight:800; font-size:14.5px; color:var(--ink); flex:1; min-width:0;}
+  .auto-badge{font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; white-space:nowrap;}
+  .auto-badge.s-ok{color:var(--pos); background:var(--accent-soft);}
+  .auto-badge.s-fail{color:var(--urgent); background:var(--urgent-soft);}
+  .auto-badge.s-stale{color:var(--pending); background:var(--pending-soft);}
+  .auto-badge.s-none{color:var(--ink-3); background:var(--surface-3);}
+  .auto-desc{font-size:12.5px; color:var(--ink-2); line-height:1.55;}
+  .auto-kv{display:flex; justify-content:space-between; gap:10px; font-size:12.5px;}
+  .auto-kv span:first-child{color:var(--ink-3);}
+  .auto-kv span:last-child{color:var(--ink); font-weight:600;}
+  .auto-last{font-size:12.5px; color:var(--ink-2); line-height:1.5; border-top:1px solid var(--line);
+    padding-top:9px;}
+  .auto-warn{font-size:12.5px; color:var(--pending); font-weight:700;}
+  .auto-fail{color:var(--urgent); font-weight:700;}
+  .auto-card .btn{align-self:flex-start;}
+
+  .auto-flow{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; padding:16px 20px 20px;}
+  .auto-step{border:1px solid var(--line); border-radius:12px; background:var(--surface-2);
+    padding:14px 15px; display:flex; flex-direction:column; gap:6px;}
+  .auto-step .no{font-size:11px; font-weight:800; letter-spacing:.1em; color:var(--accent);}
+  .auto-step .ttl{font-weight:800; font-size:14px; color:var(--ink);}
+  .auto-step .sub{font-size:12.5px; color:var(--ink-2); line-height:1.55;}
+  .auto-free{align-self:flex-start; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;
+    color:var(--pos); background:var(--accent-soft);}
+
+  .auto-logs{display:flex; flex-direction:column;}
+  .auto-log{display:flex; align-items:center; gap:10px; width:100%; text-align:left; cursor:pointer;
+    padding:11px 20px; border:0; border-top:1px solid var(--line); background:transparent;
+    color:var(--ink); font-size:13px; font-family:inherit;}
+  .auto-logs .auto-log:first-child{border-top:0;}
+  .auto-log:hover{background:var(--surface-2);}
+  .auto-log .d{color:var(--ink-3); flex:none;}
+  .auto-log .rtype-badge{flex:none;}
+  .auto-log .t{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  @media (max-width:920px){ .auto-cards{grid-template-columns:repeat(2,1fr);} .auto-flow{grid-template-columns:repeat(2,1fr);} }
+  @media (max-width:460px){ .auto-cards{grid-template-columns:1fr;} .auto-flow{grid-template-columns:1fr;} }
+
   /* ===== 요약 소계 스트립 ===== */
   .sum-strip{display:flex; flex-wrap:wrap; gap:8px 10px; padding:14px 20px 0;}
   .sum-chip{border:1px solid var(--line); background:var(--surface-2); border-radius:10px; padding:8px 12px;
@@ -1595,7 +1640,7 @@ document.addEventListener("mousemove", function(e){
 
 /* ============ 메뉴 ============ */
 var MENU = [
-  { cap:"현황", items:[ ["dashboard","📊","대시보드",0], ["brain","🧠","회사 브레인",0] ] },
+  { cap:"현황", items:[ ["dashboard","📊","대시보드",0], ["brain","🧠","회사 브레인",0], ["auto","⚙️","자동화",0] ] },
   { cap:"업무", items:[ ["todos","✅","할일관리",0], ["calendar","📅","일정관리",0], ["meetings","🎙️","전사록",0], ["memos","📝","메모관리",0], ["mail","✉️","메일관리",0] ] },
   /* 의뢰관리가 고객관리 앞에 있는 이유: 의뢰 → 고객 → 프로젝트 순으로 파이프라인이 흐른다.
      메뉴 순서가 일하는 순서와 같아야 어디를 봐야 할지 생각하지 않게 된다. */
@@ -5511,6 +5556,173 @@ function renderProfit(){
   C.innerHTML = html;
 }
 
+/* ---- 자동화 (수집기 현황) ----
+   자동 수집기 3종이 도는지 보려고 리포트 목록을 rtype 으로 걸러 읽는다.
+   별도 상태 테이블을 만들지 않은 이유: 리포트가 쌓였다는 사실 자체가 "돌았다"는
+   증거라서, 상태를 따로 기록하면 어긋날 때 무엇이 진실인지 알 수 없게 된다. */
+var AUTO_BOTS = [
+  { rtype:"영업",     icon:"🎯", name:"영업 기회 수집기", plan:"매주 월·목 08:00", desc:"수주·교육 기회 탐색" },
+  { rtype:"아이디어", icon:"💡", name:"아이디어 수집기",  plan:"매주 화·금 08:00", desc:"만들어 팔 것 탐색 — HN·Reddit·Product Hunt·구글뉴스" },
+  { rtype:"카드",     icon:"💳", name:"카드 수집기",      plan:"매일 08:30",       desc:"농협 출금알림 문자 → cards 자동 기록" }
+];
+var AUTO_STALE_DAYS = 7;   /* 주 1회 이상 도는 수집기들이라 7일 침묵이면 고장으로 본다 */
+
+/* 수집기 하나의 상태 판정. 화면과 떼어놔야 규칙을 눈으로 검증할 수 있어 순수함수로 둔다.
+   실패 표시는 리포트 제목 앞의 "⚠️" 하나로 통일되어 있다(수집 스크립트 규약). */
+function autoBotState(rows, todayD){
+  if (!rows || !rows.length) return { code:"none", label:"준비 중", last:null, days:null };
+  var sorted = rows.slice().sort(function(a,b){
+    return String(b.report_date||"").localeCompare(String(a.report_date||""));
+  });
+  var last = sorted[0];
+  var days = null, ld = parseDate(last.report_date);
+  if (ld) days = Math.floor((todayD - ld) / 86400000);
+  if (String(last.title||"").indexOf("⚠️") >= 0) return { code:"fail", label:"실패", last:last, days:days };
+  if (days !== null && days >= AUTO_STALE_DAYS) return { code:"stale", label:"멈춤 의심", last:last, days:days };
+  return { code:"ok", label:"정상", last:last, days:days };
+}
+
+function renderAuto(){
+  var html = pageHead("auto", "자동 수집기가 잘 돌고 있는지, 무엇이 쌓였는지", "");
+  var reports = (state.data && state.data.reports) || null;
+  if (!reports || typeof reports.filter !== "function" || !reports.length){
+    html += "<section class='panel'><div class='empty'>아직 데이터가 없습니다.</div></section>";
+    C.innerHTML = html;
+    return;
+  }
+  var today = seoulNow();
+  var todayD = parseDate(ymd(today));
+
+  /* rtype 별로 나눠 담고, 각각 상태를 판정한다 */
+  var bots = AUTO_BOTS.map(function(b){
+    var rows = reports.filter(function(r){ return String(r.rtype||"") === b.rtype; });
+    return { def:b, rows:rows, st:autoBotState(rows, todayD) };
+  });
+
+  /* (a) KPI — "최근 7일" 하나로 가동 여부와 수집량을 같은 잣대로 본다 */
+  function daysAgo(r){ var d = parseDate(r.report_date); return d===null ? null : Math.floor((todayD-d)/86400000); }
+  function isFail(r){ return String(r.title||"").indexOf("⚠️") >= 0; }
+  var recentOk = [], liveCnt = 0, lastAll = null, lastBotName = "";
+  bots.forEach(function(b){
+    var live = false;
+    b.rows.forEach(function(r){
+      var g = daysAgo(r);
+      if (g !== null && g < AUTO_STALE_DAYS && !isFail(r)){ recentOk.push(r); live = true; }
+    });
+    if (live) liveCnt++;
+    if (b.st.last){
+      var cur = String(b.st.last.report_date||"");
+      if (cur && cur > String(lastAll||"")){ lastAll = cur; lastBotName = b.def.name; }
+    }
+  });
+  html += "<div class='kpis'>"+
+    "<div class='kpi'><div class='label'>가동 중</div><div class='big tnum'>"+liveCnt+"/"+AUTO_BOTS.length+"</div>"+
+      "<div class='meta'>최근 "+AUTO_STALE_DAYS+"일 기준</div></div>"+
+    "<div class='kpi'><div class='label'>이번 주 수집</div><div class='big tnum'>"+comma(recentOk.length)+"건</div>"+
+      "<div class='meta'>실패 제외</div></div>"+
+    "<div class='kpi'><div class='label'>월 비용</div><div class='big tnum' style='color:var(--accent)'>0원</div>"+
+      "<div class='meta'>전부 무료 도구</div></div>"+
+    "<div class='kpi'><div class='label'>마지막 실행</div><div class='big tnum'>"+esc(lastAll ? String(lastAll).slice(0,10) : "—")+"</div>"+
+      "<div class='meta'>"+esc(lastBotName || "아직 실행 기록 없음")+"</div></div>"+
+    "</div>";
+
+  /* (b) 수집기 상태 카드 */
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>AUTOMATION</div>"+
+    "<h3>수집기 상태</h3></div></div><div class='auto-cards'>";
+  bots.forEach(function(b){
+    var st = b.st, last = st.last;
+    html += "<div class='auto-card'>"+
+      "<div class='auto-card-top'><span class='ico'>"+b.def.icon+"</span>"+
+        "<span class='nm'>"+esc(b.def.name)+"</span>"+
+        "<span class='auto-badge s-"+st.code+"'>"+esc(st.label)+"</span></div>"+
+      "<div class='auto-desc'>"+esc(b.def.desc)+"</div>"+
+      "<div class='auto-kv'><span>마지막 실행</span><span class='tnum'>"+
+        esc(last ? String(last.report_date||"").slice(0,10) : "—")+"</span></div>"+
+      "<div class='auto-kv'><span>마지막 결과</span><span>"+
+        (last ? (st.code==="fail" ? "실패" : "성공") : "—")+"</span></div>"+
+      "<div class='auto-kv'><span>예정 주기</span><span>"+esc(b.def.plan)+"</span></div>"+
+      "<div class='auto-last'>"+
+        (last ? (st.code==="fail" ? "<span class='auto-fail'>"+esc(last.title||"(제목 없음)")+"</span>"
+                                  : esc(last.title||"(제목 없음)"))
+              : "아직 리포트가 없습니다")+"</div>";
+    if (st.code === "stale"){
+      html += "<div class='auto-warn'>예정대로 안 돌고 있습니다 ("+st.days+"일째 조용)</div>";
+    }
+    if (last){
+      html += "<button class='btn sm ghost' data-auto-go='"+esc(last.id)+"'>리포트 보기</button>";
+    }
+    html += "</div>";
+  });
+  html += "</div></section>";
+
+  /* (c) 파이프라인 — 왜 공짜인지 대표가 매번 묻지 않도록 단계마다 무료 표시 */
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>무료로 도는 4단계</div>"+
+    "<h3>파이프라인</h3></div></div><div class='auto-flow'>";
+  var STEPS = [
+    ["수집", "공개 RSS·API 에서 원문을 긁어온다"],
+    ["선별(AI)", "로컬 LLM 이 읽고 쓸 것만 고른다"],
+    ["저장", "구글시트 reports 에 리포트로 쌓는다"],
+    ["학습", "다음 수집이 지난 결과를 참고한다"]
+  ];
+  STEPS.forEach(function(s, i){
+    html += "<div class='auto-step'><div class='no'>STEP "+(i+1)+"</div>"+
+      "<div class='ttl'>"+esc(s[0])+"</div><div class='sub'>"+esc(s[1])+"</div>"+
+      "<span class='auto-free'>무료</span></div>";
+  });
+  html += "</div></section>";
+
+  /* (d) 비용 표 */
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>비용</div>"+
+    "<h3>월 비용</h3></div></div><div class='tbl-scroll'>"+
+    "<table><thead><tr><th>항목</th><th>수단</th><th class='r'>월 비용</th></tr></thead><tbody>";
+  var COSTS = [
+    ["정보수집", "공개 RSS·API"],
+    ["선별·요약", "로컬 LLM"],
+    ["저장·조회", "구글시트 + Apps Script"],
+    ["예약 실행", "cron"]
+  ];
+  COSTS.forEach(function(c){
+    html += "<tr><td>"+esc(c[0])+"</td><td>"+esc(c[1])+"</td><td class='r tnum'>0원</td></tr>";
+  });
+  html += "</tbody><tfoot><tr><td colspan='2' style='color:var(--ink-2);font-weight:700'>합계</td>"+
+    "<td class='r tnum' style='color:var(--accent);font-weight:800'>0원</td></tr></tfoot></table></div></section>";
+
+  /* (e) 최근 실행 기록 — 세 수집기를 한 줄기로 합쳐 최신 10건 */
+  var logs = [];
+  bots.forEach(function(b){
+    b.rows.forEach(function(r){ logs.push({ row:r, name:b.def.name }); });
+  });
+  logs.sort(function(a,b){ return String(b.row.report_date||"").localeCompare(String(a.row.report_date||"")); });
+  logs = logs.slice(0, 10);
+  html += "<section class='panel'><div class='sec-head'><div><div class='eyebrow'>이력</div>"+
+    "<h3>최근 실행 기록</h3></div></div>";
+  if (logs.length){
+    html += "<div class='auto-logs'>";
+    logs.forEach(function(l){
+      var t = String(l.row.title||"(제목 없음)");
+      html += "<button class='auto-log' data-auto-go='"+esc(l.row.id)+"'>"+
+        "<span class='d tnum'>"+esc(String(l.row.report_date||"").slice(0,10))+"</span>"+
+        "<span class='rtype-badge adhoc'>"+esc(l.name)+"</span>"+
+        "<span class='t"+(isFail(l.row) ? " auto-fail" : "")+"'>"+esc(t)+"</span></button>";
+    });
+    html += "</div>";
+  } else {
+    html += "<div class='empty'>아직 실행 기록이 없습니다.</div>";
+  }
+  html += "</section>";
+
+  C.innerHTML = html;
+  /* 리포트 화면으로 넘길 때 필터를 "전체"로 되돌린다 — 영업·아이디어·카드 rtype 은
+     리포트 화면 필터칩에 없어서, 다른 칩이 켜져 있으면 목록에서 사라진다. */
+  C.querySelectorAll("[data-auto-go]").forEach(function(b){
+    b.onclick = function(){
+      reportFilter = "전체";
+      reportSelId = b.getAttribute("data-auto-go");
+      location.hash = "#reports";
+    };
+  });
+}
+
 /* ---- 리포트 ---- */
 var reportSelId = null, reportFilter = "전체";
 function renderReports(){
@@ -8575,7 +8787,8 @@ var ROUTES = {
   deposits:renderDeposits, expenses:renderExpenses, profit:renderProfit, reports:renderReports,
   newsrep:renderReports, youtube:renderYoutube, contests:renderContests, festivals:renderFestivals, gov:renderGov,
   subs:renderSubs, library:renderLibrary, homepage:renderHomepage, cardhist:renderCardHist,
-  company:renderCompany, taxdue:renderTaxdue, airadar:renderAiRadar, brain:renderBrain
+  company:renderCompany, taxdue:renderTaxdue, airadar:renderAiRadar, brain:renderBrain,
+  auto:renderAuto
 };
 /* 마스터 키 오류 화면 — 금고(config/portal)의 키를 수신부(GAS)가 거부했을 때.
    키 수동 입력 게이트는 제거됨 — 어드민만 여기서 새 키를 금고에 재등록할 수 있다. */
