@@ -8887,7 +8887,7 @@ document.getElementById("portalBtn").onclick = function(){ location.href = "admi
 document.getElementById("logoutBtn").onclick = async function(){
   var ok = await confirmDlg("구글 계정에서 로그아웃합니다. 이 브라우저에 저장된 접속 키와 데이터 캐시도 함께 삭제됩니다.", "로그아웃", "로그아웃");
   if (!ok) return;
-  fbAuth.signOut();   /* onAuthStateChanged(null)에서 clearKey·상태 초기화·게이트 표시 */
+  if (fbAuth) fbAuth.signOut();   /* onAuthStateChanged(null)에서 clearKey·상태 초기화·게이트 표시 */
 };
 document.getElementById("hamb").onclick = function(){ document.body.classList.toggle("nav-open"); };
 document.getElementById("backdrop").onclick = function(){ document.body.classList.remove("nav-open"); };
@@ -8979,14 +8979,29 @@ var FIREBASE_CONFIG = {
 /* 예비 어드민 dir2k@naver.com — 주 계정 사용 불가 대비 (실제 강제는 Firestore 규칙, 화면 분기용) */
 var ADMIN_EMAILS = ['kjyart@gmail.com', 'dir2k@naver.com'];
 
-firebase.initializeApp(FIREBASE_CONFIG);
-var fbAuth = firebase.auth();
-var fbDb = firebase.firestore();
+/* Firebase SDK 는 gstatic CDN 에서 온다 — 광고 차단 확장·회사망 필터·gstatic 장애 중
+   하나만 걸려도 스크립트가 안 뜬다. 예전에는 여기서 ReferenceError 가 나면서 같은
+   블록의 이후 코드가 통째로 죽었고(게이트가 「확인 중…」에 영구히 멈춤), 로그인만이
+   아니라 매출·매입·프로젝트 조회까지 전부 못 쓰게 됐다. 그래서 Firebase 는 있으면 쓰고
+   없으면 없는 대로 가는 선택 기능으로 둔다 — 실패해도 예외를 밖으로 내보내지 않고
+   fbAuth·fbDb 를 null 로 남긴 채 아래 코드가 계속 실행되게 한다. */
+var FB_BLOCKED_MSG = "구글 로그인을 쓸 수 없습니다 — 광고 차단 확장이나 네트워크가 " +
+  "Firebase(gstatic.com)를 막고 있습니다. 차단을 해제하거나 다른 네트워크에서 다시 열어 주십시오.";
+var fbAuth = null, fbDb = null;
+try {
+  if (typeof firebase === "undefined") throw new Error("Firebase SDK 미로드");
+  firebase.initializeApp(FIREBASE_CONFIG);
+  fbAuth = firebase.auth();
+  fbDb = firebase.firestore();
+} catch (e) {
+  fbAuth = null; fbDb = null;   /* 부분 초기화 상태로 남지 않게 되돌린다 */
+  console.warn("[auth] Firebase 초기화 실패 — 구글 로그인 비활성화:", e && e.message || e);
+}
 var AUTH = { user: null, grade: 0, isAdmin: false };
 
 /* ── 이메일 링크 로그인 (비밀번호 없음) — onAuthStateChanged 등록 전에 처리 ── */
 var emailLinkPending = false;
-if (fbAuth.isSignInWithEmailLink(location.href)) {
+if (fbAuth && fbAuth.isSignInWithEmailLink(location.href)) {
   emailLinkPending = true;
   var savedEmail = localStorage.getItem("emailForSignIn") ||
     prompt("로그인에 사용한 이메일을 입력하세요") || "";
@@ -9007,6 +9022,7 @@ function agSendLink(email){
   var errBox = document.getElementById("agLoginErr");
   errBox.textContent = "";
   if (!email){ document.getElementById("agEmailInput").focus(); return; }
+  if (!fbAuth){ errBox.textContent = FB_BLOCKED_MSG; return; }   /* 눌러도 아무 일 없는 버튼이 되지 않게 */
   fbAuth.sendSignInLinkToEmail(email, {
     url: location.origin + location.pathname,
     handleCodeInApp: true
@@ -9039,23 +9055,26 @@ function agDenied(title, msgHtml, withPortalLink){
   document.getElementById("agDeniedActions").innerHTML =
     (withPortalLink ? "<a class='btn primary' href='admin.html' style='text-decoration:none'>관리 포털 열기</a>" : "")+
     "<button class='btn' id='agDeniedLogout'>로그아웃</button>";
-  document.getElementById("agDeniedLogout").onclick = function(){ fbAuth.signOut(); };
+  document.getElementById("agDeniedLogout").onclick = function(){ if (fbAuth) fbAuth.signOut(); };
   agShow("agDenied");
 }
 
 /* 금고에 마스터 키 저장 — 규칙상 어드민만 쓸 수 있다 */
 function saveMasterKey(v){
+  /* 호출부(agMasterBtn·renderKeyGate)가 .catch 로 메시지를 띄우므로 여기선 거부만 한다 */
+  if (!fbDb) return Promise.reject(new Error(FB_BLOCKED_MSG));
   return fbDb.collection("config").doc("portal").set(
     { masterKey: v, updatedAt: new Date().toISOString() }, { merge: true });
 }
 
 document.getElementById("agLoginBtn").onclick = function(){
   document.getElementById("agLoginErr").textContent = "";
+  if (!fbAuth){ document.getElementById("agLoginErr").textContent = FB_BLOCKED_MSG; return; }
   fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(function(err){
     document.getElementById("agLoginErr").textContent = "로그인 실패: " + (err && err.message || err);
   });
 };
-document.getElementById("agPendingLogout").onclick = function(){ fbAuth.signOut(); };
+document.getElementById("agPendingLogout").onclick = function(){ if (fbAuth) fbAuth.signOut(); };
 document.getElementById("agMasterBtn").onclick = function(){
   var inp = document.getElementById("agMasterInput");
   var v = (inp.value || "").trim();
@@ -9069,7 +9088,13 @@ document.getElementById("agMasterBtn").onclick = function(){
   });
 };
 
-fbAuth.onAuthStateChanged(function(user){
+/* SDK 가 막히면 인증 상태 변화를 알 방법이 없다 — 게이트를 「확인 중…」에 세워두는 대신
+   로그인 카드를 바로 띄우고, 왜 안 되는지·무엇을 하면 되는지 함께 알린다. */
+if (!fbAuth){
+  agShow("agLogin");
+  document.getElementById("agLoginErr").textContent = FB_BLOCKED_MSG;
+}
+else fbAuth.onAuthStateChanged(function(user){
   if (!user){
     if (emailLinkPending){ agShow("agLoading"); return; }  /* 링크 로그인 진행 중 — 로그인 카드 깜빡임 방지 */
     AUTH.user = null; AUTH.grade = 0; AUTH.isAdmin = false;
@@ -9088,6 +9113,8 @@ fbAuth.onAuthStateChanged(function(user){
 
 /* 내 users 문서 확인 → 없으면 '대기'로 자동 생성 (admin.html과 동일 규칙 준수) */
 function resolveAccess(user){
+  /* openVault 도 여기서만 불린다 — 이 한 줄이 아래 fbDb 사용처 전부를 막아 준다 */
+  if (!fbDb){ agShow("agLogin"); document.getElementById("agLoginErr").textContent = FB_BLOCKED_MSG; return; }
   if (AUTH.isAdmin){ AUTH.grade = 1; openVault(); return; }
   var ref = fbDb.collection("users").doc(user.uid);
   ref.get().then(function(snap){
